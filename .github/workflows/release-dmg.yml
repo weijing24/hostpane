@@ -4,10 +4,16 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      bump:
+        description: Semver component to increment
+        type: choice
+        options: [patch, minor, major]
+        default: patch
 
 concurrency:
   group: release-dmg
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -18,6 +24,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Use HTTPS for Swift package GitHub URLs
         run: git config --global url."https://github.com/".insteadOf "git@github.com:"
@@ -36,31 +44,68 @@ jobs:
           swift --version | grep -E 'Swift version 6\.([2-9]|[1-9][0-9])' >/dev/null
           echo "Using $xcode"
 
+      - name: Next version
+        id: version
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+          last="$(git tag -l 'v[0-9]*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true)"
+          bump="${{ github.event.inputs.bump || 'patch' }}"
+          plist="Sources/Hostpane/Resources/Info.plist"
+          if [ -z "$last" ]; then
+            ver="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")"
+          else
+            ver="${last#v}"
+            maj="${ver%%.*}"
+            rest="${ver#*.}"
+            min="${rest%%.*}"
+            pat="${rest#*.}"
+            case "$bump" in
+              major)
+                maj=$((maj + 1))
+                min=0
+                pat=0
+                ;;
+              minor)
+                min=$((min + 1))
+                pat=0
+                ;;
+              *)
+                pat=$((pat + 1))
+                ;;
+            esac
+            ver="${maj}.${min}.${pat}"
+          fi
+          tag="v${ver}"
+          if git rev-parse "$tag" >/dev/null 2>&1; then
+            echo "Tag $tag already exists" >&2
+            exit 1
+          fi
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $ver" "$plist"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $ver" "$plist"
+          echo "ver=$ver" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Releasing $tag (bump=$bump, previous=${last:-none})"
+
       - name: Run HostpaneCheck
         run: swift run -c release HostpaneCheck
 
       - name: Build DMG
         run: ./scripts/package-dmg.sh --ci
 
-      - name: Publish latest GitHub Release
+      - name: Tag and publish GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Sources/Hostpane/Resources/Info.plist)"
-          build="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' Sources/Hostpane/Resources/Info.plist)"
+          tag="${{ steps.version.outputs.tag }}"
+          ver="${{ steps.version.outputs.ver }}"
           dmg="$(ls dist/Hostpane-*.dmg)"
-          sha="$(git rev-parse --short HEAD)"
-          {
-            echo "Hostpane ${version} (build ${build}), commit ${sha}."
-            echo
-            echo "Apple Silicon (arm64) DMG. Ad-hoc signed, not notarized."
-            echo "First launch: right-click Open, or xattr -cr /Applications/Hostpane.app"
-            echo
-            echo "Commit: ${GITHUB_SHA}"
-          } > /tmp/release-notes.md
-          gh release delete latest --yes --cleanup-tag || true
-          gh release create latest "$dmg" \
-            --prerelease \
-            --title "Hostpane ${version} (${sha})" \
-            --notes-file /tmp/release-notes.md
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$tag" -m "$tag"
+          git push origin "$tag"
+          gh release create "$tag" "$dmg" \
+            --title "$tag" \
+            --generate-notes \
+            --latest

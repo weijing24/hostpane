@@ -102,7 +102,7 @@ swift run Hostpane
 
 ## Disk image
 
-Every push to `main` publishes an Apple Silicon DMG on the [`latest` GitHub Release](https://github.com/weijing24/hostpane/releases/tag/latest).
+Every push to `main` cuts a new GitHub Release (`v0.1.0`, `v0.1.1`, …) with an Apple Silicon DMG and generated notes. Use **Actions → Release DMG → Run workflow** to bump minor or major instead of patch.
 
 ```bash
 ./scripts/package-dmg.sh
