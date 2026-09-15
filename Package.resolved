@@ -1,0 +1,33 @@
+{
+  "originHash" : "73151f70b87637d6af898de5717151d189215ae9c25254a5b8f6acba054c5a41",
+  "pins" : [
+    {
+      "identity" : "swift-argument-parser",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-argument-parser",
+      "state" : {
+        "revision" : "6a52f3251125d74daf04fcbd5e6f08a75d074382",
+        "version" : "1.8.2"
+      }
+    },
+    {
+      "identity" : "swiftterm",
+      "kind" : "remoteSourceControl",
+      "location" : "git@github.com:migueldeicaza/SwiftTerm.git",
+      "state" : {
+        "revision" : "5d14406844143538cd8f8851d2d8a67c1fe443e5",
+        "version" : "1.20.0"
+      }
+    },
+    {
+      "identity" : "traversio",
+      "kind" : "remoteSourceControl",
+      "location" : "git@github.com:GitSwiftHQ/Traversio.git",
+      "state" : {
+        "revision" : "f4d4b870152e88af8cde54514084a3f0c93afcad",
+        "version" : "1.0.8"
+      }
+    }
+  ],
+  "version" : 3
+}
