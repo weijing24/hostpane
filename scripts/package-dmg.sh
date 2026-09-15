@@ -4,11 +4,27 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 
-"$root/scripts/package-app.sh"
+ci=0
+for arg in "$@"; do
+  case "$arg" in
+    --ci) ci=1 ;;
+    *)
+      echo "Unknown option: $arg (expected --ci)" >&2
+      exit 1
+      ;;
+  esac
+done
+
+if [ "$ci" = 1 ]; then
+  "$root/scripts/package-app.sh" --ci
+  app="$root/dist/Hostpane.app"
+else
+  "$root/scripts/package-app.sh"
+  app="/Applications/Hostpane.app"
+fi
 
 version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$root/Sources/Hostpane/Resources/Info.plist")"
 arch="$(uname -m)"
-app="/Applications/Hostpane.app"
 stage="$root/dist/dmg-stage"
 dmg="$root/dist/Hostpane-${version}-${arch}.dmg"
 
@@ -44,6 +60,10 @@ hdiutil create \
 rm -rf "$stage"
 
 echo "Built $dmg"
+
+if [ "$ci" = 1 ]; then
+  exit 0
+fi
 
 dropbox="$HOME/Dropbox"
 if [ -d "$dropbox" ]; then

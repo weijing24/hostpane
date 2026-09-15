@@ -1,0 +1,62 @@
+name: Release DMG
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release-dmg
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  dmg:
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use HTTPS for Swift package GitHub URLs
+        run: git config --global url."https://github.com/".insteadOf "git@github.com:"
+
+      - name: Select latest Xcode
+        run: |
+          set -euo pipefail
+          xcode="$(ls -d /Applications/Xcode*.app 2>/dev/null | tail -1)"
+          if [ -z "$xcode" ]; then
+            echo "No Xcode.app found" >&2
+            exit 1
+          fi
+          sudo xcode-select -s "$xcode"
+          xcodebuild -version
+          swift --version
+
+      - name: Run HostpaneCheck
+        run: swift run -c release HostpaneCheck
+
+      - name: Build DMG
+        run: ./scripts/package-dmg.sh --ci
+
+      - name: Publish latest GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Sources/Hostpane/Resources/Info.plist)"
+          build="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' Sources/Hostpane/Resources/Info.plist)"
+          dmg="$(ls dist/Hostpane-*.dmg)"
+          sha="$(git rev-parse --short HEAD)"
+          notes="Hostpane ${version} (build ${build}), commit ${sha}.
+
+Apple Silicon (arm64) DMG. Ad-hoc signed, not notarized.
+First launch: right-click Open, or xattr -cr /Applications/Hostpane.app
+
+Commit: ${GITHUB_SHA}"
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest "$dmg" \
+            --prerelease \
+            --title "Hostpane ${version} (${sha})" \
+            --notes "$notes"

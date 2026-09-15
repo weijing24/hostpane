@@ -102,6 +102,8 @@ swift run Hostpane
 
 ## Disk image
 
+Every push to `main` publishes an Apple Silicon DMG on the [`latest` GitHub Release](https://github.com/weijing24/hostpane/releases/tag/latest).
+
 ```bash
 ./scripts/package-dmg.sh
 ```

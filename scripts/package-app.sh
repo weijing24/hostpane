@@ -4,6 +4,17 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 
+ci=0
+for arg in "$@"; do
+  case "$arg" in
+    --ci) ci=1 ;;
+    *)
+      echo "Unknown option: $arg (expected --ci)" >&2
+      exit 1
+      ;;
+  esac
+done
+
 if ! command -v metal >/dev/null 2>&1 && ! xcrun --find metal >/dev/null 2>&1; then
   # Command Line Tools has no `metal`. SwiftTerm's .metal resource still needs a
   # compiler during the Swift Build graph; stubs satisfy the graph. The packaged
@@ -56,6 +67,15 @@ cp "$root/Sources/Hostpane/Resources/AppIcon.icns" "$app/Contents/Resources/Host
 cp "$root/Sources/Hostpane/Resources/AppIcon-1024.png" "$app/Contents/Resources/Hostpane.png"
 printf 'APPL????' > "$app/Contents/PkgInfo"
 chmod +x "$app/Contents/MacOS/Hostpane"
+
+if [ "$ci" = 1 ]; then
+  # GitHub Actions: leave the signed app in dist/ for the DMG step.
+  xattr -cr "$app" >/dev/null 2>&1 || true
+  codesign --force --sign - "$app"
+  echo "Built $app"
+  exit 0
+fi
+
 # Sign only after the app is in /Applications. Signing dist/Hostpane.app
 # registers a path we then delete; Command-Tab keeps that stale icon.
 
