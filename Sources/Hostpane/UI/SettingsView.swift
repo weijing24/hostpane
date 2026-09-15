@@ -14,6 +14,7 @@ struct SettingsView: View {
                 connectionSection
                 terminalSection
                 sftpSection
+                loggingSection
             }
             .formStyle(.grouped)
             .navigationTitle("设置")
@@ -168,6 +169,29 @@ struct SettingsView: View {
         }
     }
 
+    @ViewBuilder
+    private var loggingSection: some View {
+        @Bindable var model = model
+        Section {
+            Toggle("记录应用日志", isOn: $model.settings.appLoggingEnabled)
+            NavigationLink {
+                AppLogView()
+            } label: {
+                Text("查看日志")
+            }
+            Button("在 Finder 中显示") {
+                model.logger.revealInFinder()
+            }
+            Button("用默认应用打开文件") {
+                model.logger.openInEditor()
+            }
+        } header: {
+            Text("开发日志")
+        } footer: {
+            Text("开发期间默认打开。日志写在 ~/Library/Logs/Hostpane/hostpane.log，超过 5 MB 会轮转。密码和密钥内容不会写入。")
+        }
+    }
+
     private func clearCache() {
         do {
             let count = try SettingsStore.clearPreviewCache()
@@ -204,6 +228,39 @@ struct TerminalDebugLogView: View {
             ToolbarItem {
                 Button("清除") { model.clearSSHDebugLogs() }
                     .disabled(model.sshDebugLogs.isEmpty)
+            }
+        }
+    }
+}
+
+struct AppLogView: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        Group {
+            if model.logger.lines.isEmpty {
+                ContentUnavailableView {
+                    Label("还没有日志", systemImage: "doc.text")
+                } description: {
+                    Text("打开 Docker、终端或 SFTP 之后，记录会出现在这里。")
+                }
+            } else {
+                List(model.logger.lines.reversed()) { line in
+                    Text(line.formattedLine)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .foregroundStyle(line.level == .error ? Color.red : Color.primary)
+                }
+            }
+        }
+        .navigationTitle("应用日志")
+        .toolbar {
+            ToolbarItem {
+                Button("打开文件") { model.logger.openInEditor() }
+            }
+            ToolbarItem {
+                Button("清除") { model.logger.clear() }
+                    .disabled(model.logger.lines.isEmpty)
             }
         }
     }

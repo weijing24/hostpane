@@ -143,6 +143,7 @@ struct HostProfileView: View {
         HStack(spacing: 10) {
             pill("启动终端") { model.openTerminal(host) }
             pill("启动 SFTP") { model.openSFTP(host) }
+            pill("Docker") { model.openDocker(host) }
             pill("端口转发") { stubMessage = "端口转发还没接上。" }
             pill("状态监控") { showInspect = true }
             Spacer(minLength: 0)

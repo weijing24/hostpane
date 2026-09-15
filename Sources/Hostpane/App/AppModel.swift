@@ -50,6 +50,7 @@ enum SidebarItem: Hashable, Identifiable {
     case dashboard
     case machines
     case sshKeys
+    case dockerHome
     case terminalHome
     case session(UUID)
     case sftpHome
@@ -60,6 +61,7 @@ enum SidebarItem: Hashable, Identifiable {
         case .dashboard: return "dashboard"
         case .machines: return "machines"
         case .sshKeys: return "sshKeys"
+        case .dockerHome: return "docker-home"
         case .terminalHome: return "terminal-home"
         case .session(let id): return "session-\(id.uuidString)"
         case .sftpHome: return "sftp-home"
@@ -95,6 +97,29 @@ final class HostRuntime {
     var sftpListings: [SFTPListingItem] = []
     var sftpStatus = ""
     var sftpBusy = false
+
+    let dockerEngine = SSHEngine()
+    let dockerProgress = DockerConnectionProgress()
+    var dockerParser = DockerParser()
+    var dockerTask: Task<Void, Never>?
+    var dockerPhase: ConnectionPhase = .idle
+    var dockerSnapshot: DockerSnapshot?
+    var dockerTab: DockerTab = .overview
+    var dockerBusy = false
+    var dockerStatus = ""
+    var dockerContainerFilter: DockerContainerFilter = .all
+    var dockerContainerQuery = ""
+    var dockerContainerSort: DockerContainerSort = .name
+    var dockerSelectedContainerID: String?
+    var dockerSelectedImageID: String?
+    var dockerSelectedVolumeID: String?
+    var dockerSelectedNetworkID: String?
+    var dockerImageInspectInFlight: Set<String> = []
+    var dockerVolumeInspectInFlight: Set<String> = []
+    var dockerNetworkInspectInFlight: Set<String> = []
+    var dockerEventFilter: DockerEventFilter = .all
+    var dockerEventsLoaded = false
+    var dockerStatHistory: [String: [DockerStatPoint]] = [:]
 
     init(hostID: UUID) {
         self.hostID = hostID
@@ -164,9 +189,36 @@ final class HostRuntime {
         }
     }
 
+    func stopDocker() {
+        dockerTask?.cancel()
+        dockerTask = nil
+        dockerBusy = false
+        dockerStatus = ""
+        dockerSnapshot = nil
+        dockerTab = .overview
+        dockerContainerFilter = .all
+        dockerContainerQuery = ""
+        dockerSelectedContainerID = nil
+        dockerSelectedImageID = nil
+        dockerSelectedVolumeID = nil
+        dockerSelectedNetworkID = nil
+        dockerImageInspectInFlight = []
+        dockerVolumeInspectInFlight = []
+        dockerNetworkInspectInFlight = []
+        dockerEventFilter = .all
+        dockerEventsLoaded = false
+        dockerStatHistory = [:]
+        dockerProgress.reset()
+        dockerProgress.cardVisible = false
+        dockerPhase = .idle
+        let engine = dockerEngine
+        Task { await engine.close() }
+    }
+
     func stopAll() {
         stop()
         stopSFTP()
+        stopDocker()
     }
 
     var latencySeconds: Double? { latency.medianSeconds }
@@ -190,6 +242,8 @@ final class AppModel {
     var machineFilter: MachineFilter = .all
     var dashboardSearch: String = ""
     var dashboardFilter: MachineFilter = .all
+    var dockerSearch: String = ""
+    var dockerInspectHostID: UUID?
     var editor: HostEditorState?
     var keyEditor: KeyEditorState?
     var importMessage: String?
@@ -204,6 +258,7 @@ final class AppModel {
     var sessionFontSheetPresented = false
     var configSyncNeedsRestart = false
     var configSyncError: String?
+    let logger = AppLogger()
     private(set) var runtimes: [UUID: HostRuntime] = [:]
 
     private let store: HostStore
@@ -239,6 +294,8 @@ final class AppModel {
                 .compactMap { $0 }
                 .joined(separator: "\n")
         }
+        logger.enabled = settings.appLoggingEnabled
+        logger.info("app", "Hostpane started hosts=\(hosts.count) logging=\(logger.enabled)")
     }
 
     var selectedHost: HostRecord? {
@@ -337,6 +394,16 @@ final class AppModel {
         }
     }
 
+    var dockerHosts: [HostRecord] {
+        let query = dockerSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        if query.isEmpty { return hosts }
+        return hosts.filter { host in
+            host.displayName.localizedCaseInsensitiveContains(query)
+                || host.hostname.localizedCaseInsensitiveContains(query)
+                || host.username.localizedCaseInsensitiveContains(query)
+        }
+    }
+
     func runtime(for id: UUID) -> HostRuntime {
         if let existing = runtimes[id] {
             return existing
@@ -376,6 +443,7 @@ final class AppModel {
         var next = settings
         next.clamp()
         settings = next
+        logger.enabled = next.appLoggingEnabled
         try? settingsStore.save(next)
         applyAppearance()
     }
@@ -399,6 +467,19 @@ final class AppModel {
         sshDebugLogs.append(ConnectionLogLine(event: event))
         if sshDebugLogs.count > 400 {
             sshDebugLogs.removeFirst(sshDebugLogs.count - 400)
+        }
+        if event.level == .error || event.level == .warning {
+            logger.log(event.level == .error ? .error : .warn, "ssh", event.message)
+        }
+    }
+
+    private func logExec(_ category: String, _ label: String, _ result: SSHExecResult) {
+        let stderr = String(decoding: result.standardError, as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let exit = result.exitStatus.map(String.init) ?? "?"
+        logger.info(category, "\(label) stdout=\(result.standardOutput.count)B exit=\(exit)")
+        if !stderr.isEmpty {
+            logger.warn(category, "\(label) stderr: \(stderr.prefix(800))")
         }
     }
 
@@ -549,6 +630,7 @@ final class AppModel {
     func deleteHost(_ host: HostRecord) throws {
         disconnect(host)
         closeSFTP(host)
+        closeDocker(host)
         hosts.removeAll { $0.id == host.id }
         runtimes[host.id] = nil
         if settings.dashboardHostIDs.contains(host.id) {
@@ -563,6 +645,9 @@ final class AppModel {
         }
         if case .sftp(let id) = sidebarSelection, id == host.id {
             sidebarSelection = .machines
+        }
+        if dockerInspectHostID == host.id {
+            dockerInspectHostID = nil
         }
     }
 
@@ -718,6 +803,463 @@ final class AppModel {
     func restartSFTP(_ host: HostRecord) {
         let path = runtime(for: host.id).sftpPath
         startSFTP(host, initialPath: path)
+    }
+
+    func openDocker(_ host: HostRecord) {
+        sidebarSelection = .dockerHome
+        dockerInspectHostID = host.id
+        let runtime = runtime(for: host.id)
+        switch runtime.dockerPhase {
+        case .connecting:
+            return
+        case .connected:
+            runtime.dockerProgress.cardVisible = false
+        case .idle, .failed:
+            startDocker(host)
+        }
+    }
+
+    func closeDocker(_ host: HostRecord) {
+        runtime(for: host.id).stopDocker()
+        if dockerInspectHostID == host.id {
+            dockerInspectHostID = nil
+        }
+    }
+
+    func restartDocker(_ host: HostRecord) {
+        startDocker(host)
+    }
+
+    func startDocker(_ host: HostRecord) {
+        guard !host.hostname.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let runtime = runtime(for: host.id)
+        runtime.dockerTask?.cancel()
+        runtime.dockerBusy = false
+        runtime.dockerStatus = "正在连接…"
+        runtime.dockerSnapshot = nil
+        runtime.dockerTab = .overview
+        runtime.dockerPhase = .connecting
+        runtime.lastError = nil
+        runtime.dockerProgress.reset()
+        runtime.dockerProgress.appendSetup(host: host)
+        logger.info("docker", "connect \(host.displayName) \(host.username)@\(host.hostname):\(host.port)")
+        let engine = runtime.dockerEngine
+        let secrets = self.secrets
+        let settings = self.settings
+        runtime.dockerTask = Task { [weak self, weak runtime] in
+            guard let self, let runtime else { return }
+            await engine.close()
+            do {
+                let hostID = host.id
+                try await engine.connect(
+                    host: host,
+                    secrets: secrets,
+                    settings: settings,
+                    keepAlive: .docker
+                ) { event in
+                    Task { @MainActor [weak self] in
+                        self?.runtime(for: hostID).dockerProgress.ingest(event)
+                        self?.appendSSHLog(event)
+                    }
+                }
+                guard !Task.isCancelled else { return }
+                runtime.dockerProgress.mark(.connect, .done)
+                runtime.dockerProgress.mark(.detect, .running)
+                runtime.dockerProgress.append(
+                    category: "diagnostics",
+                    message: "Detecting Docker engine"
+                )
+                let detect = try await engine.execute(DockerProbe.detectCommand)
+                logExec("docker", "detect", detect)
+                let detectText = String(decoding: detect.standardOutput, as: UTF8.self)
+                let engineInfo = try runtime.dockerParser.parseDetect(detectText)
+                logger.info("docker", "engine \(engineInfo.version) socket=\(engineInfo.socket) context=\(engineInfo.context)")
+                runtime.dockerProgress.appendDetect(engine: engineInfo)
+                runtime.dockerProgress.mark(.detect, .done)
+                runtime.dockerProgress.mark(.load, .running)
+                runtime.dockerProgress.appendLoad()
+                let snapshotResult = try await engine.execute(DockerProbe.snapshotCommand)
+                logExec("docker", "snapshot", snapshotResult)
+                let snapshotText = String(decoding: snapshotResult.standardOutput, as: UTF8.self)
+                var snapshot = try runtime.dockerParser.parseSnapshot(snapshotText)
+                snapshot.engine = engineInfo
+                logger.info("docker", "inventory containers=\(snapshot.containers.count) images=\(snapshot.images.count)")
+                runtime.dockerSnapshot = snapshot
+                Self.recordDockerStats(snapshot, on: runtime)
+                runtime.dockerProgress.mark(.load, .done)
+                runtime.dockerProgress.mark(.ready, .done)
+                runtime.dockerPhase = .connected
+                runtime.dockerStatus = "已连接"
+                runtime.dockerProgress.cardVisible = false
+                await self.refreshDockerLive(runtime, engine: engine)
+                Task { [weak runtime] in
+                    guard let runtime else { return }
+                    await self.refreshDockerDisk(runtime, engine: engine)
+                }
+                await self.pollDocker(runtime: runtime, engine: engine)
+            } catch is CancellationError {
+                logger.info("docker", "connect cancelled \(host.displayName)")
+                runtime.dockerPhase = .idle
+            } catch {
+                logger.error("docker", "connect failed \(host.displayName): \(describeSSHError(error))")
+                runtime.dockerProgress.failRemaining()
+                runtime.dockerPhase = .failed(describeSSHError(error))
+                runtime.lastError = describeSSHError(error)
+                runtime.dockerStatus = describeSSHError(error)
+            }
+        }
+    }
+
+    func dockerAction(_ host: HostRecord, _ verb: String, name: String) async {
+        let runtime = runtime(for: host.id)
+        guard runtime.dockerPhase == .connected else { return }
+        runtime.dockerBusy = true
+        runtime.dockerStatus = "正在 \(verb) \(name)…"
+        defer { runtime.dockerBusy = false }
+        do {
+            _ = try await runtime.dockerEngine.execute(DockerProbe.actionCommand(verb, name: name))
+            if verb.contains("rm"), runtime.dockerSelectedContainerID == name {
+                runtime.dockerSelectedContainerID = nil
+            }
+            try await refreshDockerSnapshot(runtime)
+            runtime.dockerStatus = "已完成"
+        } catch {
+            runtime.dockerStatus = describeSSHError(error)
+            logger.error("docker", "action \(verb) \(name): \(describeSSHError(error))")
+        }
+    }
+
+    func dockerRemoveImage(_ host: HostRecord, image: DockerImage) async {
+        let runtime = runtime(for: host.id)
+        guard runtime.dockerPhase == .connected else { return }
+        runtime.dockerBusy = true
+        runtime.dockerStatus = "正在删除镜像…"
+        defer { runtime.dockerBusy = false }
+        do {
+            _ = try await runtime.dockerEngine.execute(DockerProbe.imageRemoveCommand(name: image.reference))
+            if runtime.dockerSelectedImageID == image.id {
+                runtime.dockerSelectedImageID = nil
+            }
+            try await refreshDockerSnapshot(runtime)
+            runtime.dockerStatus = "已删除镜像"
+        } catch {
+            runtime.dockerStatus = describeSSHError(error)
+            logger.error("docker", "rmi \(image.reference): \(describeSSHError(error))")
+        }
+    }
+
+    func dockerTagImage(_ host: HostRecord, image: DockerImage, target: String) async {
+        let runtime = runtime(for: host.id)
+        guard runtime.dockerPhase == .connected else { return }
+        let trimmed = target.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        runtime.dockerBusy = true
+        runtime.dockerStatus = "正在打标签…"
+        defer { runtime.dockerBusy = false }
+        do {
+            _ = try await runtime.dockerEngine.execute(
+                DockerProbe.imageTagCommand(source: image.reference, target: trimmed)
+            )
+            try await refreshDockerSnapshot(runtime)
+            runtime.dockerStatus = "已打标签 \(trimmed)"
+        } catch {
+            runtime.dockerStatus = describeSSHError(error)
+            logger.error("docker", "tag \(image.reference) -> \(trimmed): \(describeSSHError(error))")
+        }
+    }
+
+    func refreshDockerImageInspect(_ host: HostRecord, imageID: String) async {
+        let runtime = runtime(for: host.id)
+        guard runtime.dockerPhase == .connected else { return }
+        guard let image = runtime.dockerSnapshot?.images.first(where: { $0.id == imageID }) else { return }
+        if image.historyLoaded { return }
+        if runtime.dockerImageInspectInFlight.contains(imageID) { return }
+        runtime.dockerImageInspectInFlight.insert(imageID)
+        defer { runtime.dockerImageInspectInFlight.remove(imageID) }
+        let engine = runtime.dockerEngine
+        let reference = image.reference
+        do {
+            let history = try await engine.execute(DockerProbe.imageHistoryCommand(name: reference))
+            let historyText = String(decoding: history.standardOutput, as: UTF8.self)
+            if let current = runtime.dockerSnapshot {
+                runtime.dockerSnapshot = runtime.dockerParser.mergeImageHistory(
+                    historyText,
+                    imageID: imageID,
+                    into: current
+                )
+            }
+        } catch {
+            logger.warn("docker", "image history \(reference): \(describeSSHError(error))")
+            if let current = runtime.dockerSnapshot {
+                runtime.dockerSnapshot = runtime.dockerParser.mergeImageHistory(
+                    "",
+                    imageID: imageID,
+                    into: current
+                )
+            }
+        }
+        do {
+            let inspect = try await engine.execute(DockerProbe.inspectCommand(name: reference))
+            let inspectText = String(decoding: inspect.standardOutput, as: UTF8.self)
+            if let current = runtime.dockerSnapshot {
+                runtime.dockerSnapshot = runtime.dockerParser.mergeImageInspect(
+                    inspectText,
+                    imageID: imageID,
+                    into: current
+                )
+            }
+        } catch {
+            logger.warn("docker", "image inspect \(reference): \(describeSSHError(error))")
+        }
+    }
+
+    func refreshDockerVolumeInspect(_ host: HostRecord, name: String) async {
+        let runtime = runtime(for: host.id)
+        guard runtime.dockerPhase == .connected else { return }
+        if runtime.dockerSnapshot?.volumes.first(where: { $0.name == name })?.inspectLoaded == true { return }
+        if runtime.dockerVolumeInspectInFlight.contains(name) { return }
+        runtime.dockerVolumeInspectInFlight.insert(name)
+        defer { runtime.dockerVolumeInspectInFlight.remove(name) }
+        do {
+            let result = try await runtime.dockerEngine.execute(DockerProbe.volumeInspectCommand(name: name))
+            let text = String(decoding: result.standardOutput, as: UTF8.self)
+            if let current = runtime.dockerSnapshot {
+                runtime.dockerSnapshot = runtime.dockerParser.mergeVolumeInspect(text, name: name, into: current)
+            }
+        } catch {
+            logger.warn("docker", "volume inspect \(name): \(describeSSHError(error))")
+        }
+    }
+
+    func dockerRemoveVolume(_ host: HostRecord, name: String) async {
+        let runtime = runtime(for: host.id)
+        guard runtime.dockerPhase == .connected else { return }
+        runtime.dockerBusy = true
+        runtime.dockerStatus = "正在删除卷…"
+        defer { runtime.dockerBusy = false }
+        do {
+            _ = try await runtime.dockerEngine.execute(DockerProbe.volumeRemoveCommand(name: name))
+            if runtime.dockerSelectedVolumeID == name {
+                runtime.dockerSelectedVolumeID = nil
+            }
+            try await refreshDockerSnapshot(runtime)
+            runtime.dockerStatus = "已删除卷"
+        } catch {
+            runtime.dockerStatus = describeSSHError(error)
+            logger.error("docker", "volume rm \(name): \(describeSSHError(error))")
+        }
+    }
+
+    func dockerPruneVolumes(_ host: HostRecord) async {
+        let runtime = runtime(for: host.id)
+        guard runtime.dockerPhase == .connected else { return }
+        runtime.dockerBusy = true
+        runtime.dockerStatus = "正在清理未使用的卷…"
+        defer { runtime.dockerBusy = false }
+        do {
+            let result = try await runtime.dockerEngine.execute(DockerProbe.volumePruneCommand)
+            let output = String(decoding: result.standardOutput, as: UTF8.self)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            try await refreshDockerSnapshot(runtime)
+            runtime.dockerStatus = output.isEmpty ? "已清理未使用的卷" : output
+            logger.info("docker", "volume prune: \(output.prefix(200))")
+        } catch {
+            runtime.dockerStatus = describeSSHError(error)
+            logger.error("docker", "volume prune: \(describeSSHError(error))")
+        }
+    }
+
+    func refreshDockerNetworkInspect(_ host: HostRecord, name: String) async {
+        let runtime = runtime(for: host.id)
+        guard runtime.dockerPhase == .connected else { return }
+        if runtime.dockerSnapshot?.networks.first(where: { $0.name == name })?.inspectLoaded == true { return }
+        if runtime.dockerNetworkInspectInFlight.contains(name) { return }
+        runtime.dockerNetworkInspectInFlight.insert(name)
+        defer { runtime.dockerNetworkInspectInFlight.remove(name) }
+        do {
+            let result = try await runtime.dockerEngine.execute(DockerProbe.networkInspectCommand(name: name))
+            let text = String(decoding: result.standardOutput, as: UTF8.self)
+            if let current = runtime.dockerSnapshot {
+                runtime.dockerSnapshot = runtime.dockerParser.mergeNetworkInspect(text, name: name, into: current)
+            }
+        } catch {
+            logger.warn("docker", "network inspect \(name): \(describeSSHError(error))")
+        }
+    }
+
+    func dockerRemoveNetwork(_ host: HostRecord, name: String) async {
+        let runtime = runtime(for: host.id)
+        guard runtime.dockerPhase == .connected else { return }
+        if ["bridge", "host", "none"].contains(name) {
+            runtime.dockerStatus = "无法删除内置网络。"
+            return
+        }
+        runtime.dockerBusy = true
+        runtime.dockerStatus = "正在删除网络…"
+        defer { runtime.dockerBusy = false }
+        do {
+            _ = try await runtime.dockerEngine.execute(DockerProbe.networkRemoveCommand(name: name))
+            if runtime.dockerSelectedNetworkID == name {
+                runtime.dockerSelectedNetworkID = nil
+            }
+            try await refreshDockerSnapshot(runtime)
+            runtime.dockerStatus = "已删除网络"
+        } catch {
+            runtime.dockerStatus = describeSSHError(error)
+            logger.error("docker", "network rm \(name): \(describeSSHError(error))")
+        }
+    }
+
+    private func refreshDockerSnapshot(_ runtime: HostRuntime) async throws {
+        let result = try await runtime.dockerEngine.execute(DockerProbe.snapshotCommand)
+        let text = String(decoding: result.standardOutput, as: UTF8.self)
+        var snapshot = try runtime.dockerParser.parseSnapshot(text)
+        if let current = runtime.dockerSnapshot {
+            if snapshot.engine.version.isEmpty { snapshot.engine = current.engine }
+            if snapshot.disk.totalBytes == 0 { snapshot.disk = current.disk }
+            let previous = Dictionary(uniqueKeysWithValues: current.images.map { ($0.id, $0) })
+            for index in snapshot.images.indices {
+                guard let old = previous[snapshot.images[index].id] else { continue }
+                if snapshot.images[index].layers.isEmpty {
+                    snapshot.images[index].layers = old.layers
+                }
+                snapshot.images[index].historyLoaded = old.historyLoaded
+                if snapshot.images[index].digest.isEmpty { snapshot.images[index].digest = old.digest }
+                if snapshot.images[index].createdAt.isEmpty { snapshot.images[index].createdAt = old.createdAt }
+                if snapshot.images[index].repoTags.count <= 1, old.repoTags.count > 1 {
+                    snapshot.images[index].repoTags = old.repoTags
+                }
+            }
+            let previousVolumes = Dictionary(uniqueKeysWithValues: current.volumes.map { ($0.name, $0) })
+            for index in snapshot.volumes.indices {
+                guard let old = previousVolumes[snapshot.volumes[index].name] else { continue }
+                if snapshot.volumes[index].mountpoint.isEmpty { snapshot.volumes[index].mountpoint = old.mountpoint }
+                if snapshot.volumes[index].scope.isEmpty { snapshot.volumes[index].scope = old.scope }
+                if snapshot.volumes[index].createdAt.isEmpty { snapshot.volumes[index].createdAt = old.createdAt }
+                if snapshot.volumes[index].labels.isEmpty { snapshot.volumes[index].labels = old.labels }
+                snapshot.volumes[index].inspectLoaded = old.inspectLoaded
+            }
+            let previousNetworks = Dictionary(uniqueKeysWithValues: current.networks.map { ($0.name, $0) })
+            for index in snapshot.networks.indices {
+                guard let old = previousNetworks[snapshot.networks[index].name] else { continue }
+                if snapshot.networks[index].subnet.isEmpty { snapshot.networks[index].subnet = old.subnet }
+                if snapshot.networks[index].gateway.isEmpty { snapshot.networks[index].gateway = old.gateway }
+                if snapshot.networks[index].scope.isEmpty { snapshot.networks[index].scope = old.scope }
+                snapshot.networks[index].inspectLoaded = old.inspectLoaded || snapshot.networks[index].inspectLoaded
+            }
+        }
+        runtime.dockerSnapshot = snapshot
+        Self.recordDockerStats(snapshot, on: runtime)
+    }
+
+    private func pollDocker(runtime: HostRuntime, engine: SSHEngine) async {
+        var ticks = 0
+        while !Task.isCancelled, runtime.dockerPhase == .connected {
+            try? await Task.sleep(for: .seconds(4))
+            guard !Task.isCancelled, runtime.dockerPhase == .connected, !runtime.dockerBusy else { continue }
+            await refreshDockerLive(runtime, engine: engine)
+            ticks += 1
+            if ticks % 3 == 0 {
+                await refreshDockerDisk(runtime, engine: engine)
+            }
+        }
+    }
+
+    private func refreshDockerLive(_ runtime: HostRuntime, engine: SSHEngine) async {
+        do {
+            let result = try await engine.execute(DockerProbe.liveCommand)
+            let text = String(decoding: result.standardOutput, as: UTF8.self)
+            let snapshot: DockerSnapshot
+            if let current = runtime.dockerSnapshot {
+                snapshot = runtime.dockerParser.mergeLive(current, text: text)
+            } else {
+                snapshot = try runtime.dockerParser.parseSnapshot(text)
+            }
+            runtime.dockerSnapshot = snapshot
+            Self.recordDockerStats(snapshot, on: runtime)
+        } catch is CancellationError {
+            return
+        } catch {
+            logger.error("docker", "live failed: \(describeSSHError(error))")
+            runtime.dockerStatus = describeSSHError(error)
+        }
+    }
+
+    private func refreshDockerDisk(_ runtime: HostRuntime, engine: SSHEngine) async {
+        do {
+            let result = try await engine.execute(DockerProbe.diskCommand)
+            let text = String(decoding: result.standardOutput, as: UTF8.self)
+            if let current = runtime.dockerSnapshot {
+                runtime.dockerSnapshot = runtime.dockerParser.mergeLive(current, text: text)
+            }
+        } catch {
+            logger.warn("docker", "df failed: \(describeSSHError(error))")
+        }
+    }
+
+    func refreshDockerContainerInspect(_ host: HostRecord, name: String) async {
+        let runtime = runtime(for: host.id)
+        guard runtime.dockerPhase == .connected else { return }
+        do {
+            let result = try await runtime.dockerEngine.execute(DockerProbe.inspectCommand(name: name))
+            let text = String(decoding: result.standardOutput, as: UTF8.self)
+            if let current = runtime.dockerSnapshot {
+                runtime.dockerSnapshot = runtime.dockerParser.mergeInspectJSON(text, into: current)
+            }
+        } catch {
+            runtime.dockerStatus = describeSSHError(error)
+        }
+    }
+
+    func refreshDockerEvents(_ host: HostRecord) async {
+        let runtime = runtime(for: host.id)
+        guard runtime.dockerPhase == .connected else { return }
+        do {
+            let result = try await runtime.dockerEngine.execute(DockerProbe.eventsCommand)
+            let text = String(decoding: result.standardOutput, as: UTF8.self)
+            if let current = runtime.dockerSnapshot {
+                runtime.dockerSnapshot = runtime.dockerParser.mergeEvents(text, into: current)
+            }
+            runtime.dockerEventsLoaded = true
+            logger.info("docker", "events \(runtime.dockerSnapshot?.events.count ?? 0)")
+        } catch {
+            runtime.dockerEventsLoaded = true
+            runtime.dockerStatus = describeSSHError(error)
+            logger.warn("docker", "events: \(describeSSHError(error))")
+        }
+    }
+
+    private static func recordDockerStats(_ snapshot: DockerSnapshot, on runtime: HostRuntime) {
+        let now = Date()
+        for container in snapshot.containers {
+            var series = runtime.dockerStatHistory[container.name] ?? []
+            series.append(
+                DockerStatPoint(
+                    at: now,
+                    cpuRatio: container.cpuRatio,
+                    memoryRatio: container.memoryRatio,
+                    memoryUsedBytes: container.memoryUsedBytes
+                )
+            )
+            if series.count > 80 {
+                series.removeFirst(series.count - 80)
+            }
+            runtime.dockerStatHistory[container.name] = series
+        }
+    }
+
+    func dockerText(for host: HostRecord, command: String) async -> String {
+        let runtime = runtime(for: host.id)
+        guard runtime.dockerPhase == .connected else { return "尚未连接。" }
+        do {
+            let result = try await runtime.dockerEngine.execute(command)
+            let output = String(decoding: result.standardOutput, as: UTF8.self)
+            let error = String(decoding: result.standardError, as: UTF8.self)
+            let combined = [output, error].filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.joined(separator: "\n")
+            return combined.isEmpty ? "(无输出)" : combined
+        } catch {
+            return describeSSHError(error)
+        }
     }
 
     func startSFTP(_ host: HostRecord, initialPath: String? = nil) {

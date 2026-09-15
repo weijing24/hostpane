@@ -203,26 +203,8 @@ private struct MachineCard: View {
             Spacer(minLength: 8)
             if hovering, !batchEditing {
                 HStack(spacing: 8) {
-                    CircleActionButton(
-                        systemImage: "terminal.fill",
-                        idleFill: HostpaneTheme.accent.opacity(0.16),
-                        activeFill: HostpaneTheme.accent,
-                        idleForeground: HostpaneTheme.accent,
-                        activeForeground: .white,
-                        help: "终端"
-                    ) {
-                        model.openTerminal(host)
-                    }
-                    CircleActionButton(
-                        systemImage: "folder.fill",
-                        idleFill: HostpaneTheme.sftpTint.opacity(0.45),
-                        activeFill: HostpaneTheme.sftpTint,
-                        idleForeground: .primary.opacity(0.45),
-                        activeForeground: .primary.opacity(0.85),
-                        help: "SFTP"
-                    ) {
-                        model.openSFTP(host)
-                    }
+                    CircleActionButton.terminal { model.openTerminal(host) }
+                    CircleActionButton.sftp { model.openSFTP(host) }
                 }
             }
         }
@@ -245,6 +227,7 @@ private struct MachineCard: View {
             Button("查看详情") { onOpen() }
             Button("打开终端") { model.openTerminal(host) }
             Button("打开 SFTP") { model.openSFTP(host) }
+            Button("打开 Docker") { model.openDocker(host) }
             Button("编辑") { model.beginEditHost(host) }
             Divider()
             Button("删除", role: .destructive) { try? model.deleteHost(host) }
@@ -270,6 +253,30 @@ struct CircleActionButton: View {
     var help: String
     var action: () -> Void
     @State private var hovering = false
+
+    static func terminal(action: @escaping () -> Void) -> CircleActionButton {
+        CircleActionButton(
+            systemImage: "terminal.fill",
+            idleFill: HostpaneTheme.accent.opacity(0.16),
+            activeFill: HostpaneTheme.accent,
+            idleForeground: HostpaneTheme.accent,
+            activeForeground: .white,
+            help: "终端",
+            action: action
+        )
+    }
+
+    static func sftp(action: @escaping () -> Void) -> CircleActionButton {
+        CircleActionButton(
+            systemImage: "folder.fill",
+            idleFill: HostpaneTheme.sftpAccent.opacity(0.16),
+            activeFill: HostpaneTheme.sftpAccent,
+            idleForeground: HostpaneTheme.sftpAccent,
+            activeForeground: .white,
+            help: "SFTP",
+            action: action
+        )
+    }
 
     var body: some View {
         Button(action: action) {

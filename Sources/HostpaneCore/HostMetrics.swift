@@ -247,8 +247,16 @@ public struct HostMetrics: Equatable, Sendable {
     public var diskWriteBytesPerSecond: Double?
     public var processes: [ProcessSample]
     public var containers: [ContainerSample]
+    public var dockerEngineVersion: String
+    public var dockerImageCount: Int
+    public var dockerRunningCount: Int
+    public var dockerStoppedCount: Int
     public var sshLatencySeconds: Double?
     public var sampledAt: Date
+
+    public var hasDockerEngine: Bool {
+        !dockerEngineVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 
     public var memoryUsedBytes: UInt64 {
         memoryTotalBytes > memoryAvailableBytes ? memoryTotalBytes - memoryAvailableBytes : 0
@@ -366,6 +374,10 @@ public struct HostMetrics: Equatable, Sendable {
         diskWriteBytesPerSecond: Double? = nil,
         processes: [ProcessSample] = [],
         containers: [ContainerSample] = [],
+        dockerEngineVersion: String = "",
+        dockerImageCount: Int = 0,
+        dockerRunningCount: Int = 0,
+        dockerStoppedCount: Int = 0,
         sshLatencySeconds: Double? = nil,
         sampledAt: Date
     ) {
@@ -394,6 +406,10 @@ public struct HostMetrics: Equatable, Sendable {
         self.diskWriteBytesPerSecond = diskWriteBytesPerSecond
         self.processes = processes
         self.containers = containers
+        self.dockerEngineVersion = dockerEngineVersion
+        self.dockerImageCount = dockerImageCount
+        self.dockerRunningCount = dockerRunningCount
+        self.dockerStoppedCount = dockerStoppedCount
         self.sshLatencySeconds = sshLatencySeconds
         self.sampledAt = sampledAt
     }
@@ -426,6 +442,10 @@ extension HostMetrics {
             && lhs.diskWriteBytesPerSecond == rhs.diskWriteBytesPerSecond
             && lhs.processes == rhs.processes
             && lhs.containers == rhs.containers
+            && lhs.dockerEngineVersion == rhs.dockerEngineVersion
+            && lhs.dockerImageCount == rhs.dockerImageCount
+            && lhs.dockerRunningCount == rhs.dockerRunningCount
+            && lhs.dockerStoppedCount == rhs.dockerStoppedCount
             && lhs.sshLatencySeconds == rhs.sshLatencySeconds
             && lhs.sampledAt == rhs.sampledAt
     }

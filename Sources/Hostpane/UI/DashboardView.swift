@@ -274,6 +274,7 @@ private struct DashboardHostCard: View {
             Button("查看详情") { onOpen() }
             Button("打开终端") { model.openTerminal(host) }
             Button("打开 SFTP") { model.openSFTP(host) }
+            Button("打开 Docker") { model.openDocker(host) }
             Button("编辑") { model.beginEditHost(host) }
             Divider()
             Button("重新检测") { model.startMonitor(host, restart: true) }
@@ -290,15 +291,9 @@ private struct DashboardHostCard: View {
                 .lineLimit(1)
             Spacer(minLength: 8)
             if hovering {
-                CircleActionButton(
-                    systemImage: "terminal.fill",
-                    idleFill: HostpaneTheme.accent.opacity(0.16),
-                    activeFill: HostpaneTheme.accent,
-                    idleForeground: HostpaneTheme.accent,
-                    activeForeground: .white,
-                    help: "终端"
-                ) {
-                    model.openTerminal(host)
+                HStack(spacing: 8) {
+                    CircleActionButton.terminal { model.openTerminal(host) }
+                    CircleActionButton.sftp { model.openSFTP(host) }
                 }
             }
             statusBadge

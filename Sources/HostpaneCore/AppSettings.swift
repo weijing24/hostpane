@@ -116,6 +116,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var terminalCursorBlink: Bool
     public var terminalInactiveCursor: TerminalInactiveCursor
     public var terminalScrollbar: TerminalScrollbar
+    public var appLoggingEnabled: Bool
 
     public init(
         connectionTimeoutSeconds: Int = 15,
@@ -136,7 +137,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
         terminalCursorShape: TerminalCursorShape = .block,
         terminalCursorBlink: Bool = true,
         terminalInactiveCursor: TerminalInactiveCursor = .fade,
-        terminalScrollbar: TerminalScrollbar = .overlay
+        terminalScrollbar: TerminalScrollbar = .overlay,
+        appLoggingEnabled: Bool = true
     ) {
         self.connectionTimeoutSeconds = connectionTimeoutSeconds
         self.alwaysTrustHostKeys = alwaysTrustHostKeys
@@ -157,6 +159,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.terminalCursorBlink = terminalCursorBlink
         self.terminalInactiveCursor = terminalInactiveCursor
         self.terminalScrollbar = terminalScrollbar
+        self.appLoggingEnabled = appLoggingEnabled
         clamp()
     }
 
@@ -181,6 +184,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         terminalCursorBlink = try container.decodeIfPresent(Bool.self, forKey: .terminalCursorBlink) ?? true
         terminalInactiveCursor = try container.decodeIfPresent(TerminalInactiveCursor.self, forKey: .terminalInactiveCursor) ?? .fade
         terminalScrollbar = try container.decodeIfPresent(TerminalScrollbar.self, forKey: .terminalScrollbar) ?? .overlay
+        appLoggingEnabled = try container.decodeIfPresent(Bool.self, forKey: .appLoggingEnabled) ?? true
         clamp()
     }
 
@@ -222,6 +226,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         case terminalCursorBlink
         case terminalInactiveCursor
         case terminalScrollbar
+        case appLoggingEnabled
     }
 }
 

@@ -6,7 +6,7 @@ struct HostpaneApp: App {
     @State private var model = AppModel()
 
     init() {
-        if let url = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
+        if let url = Bundle.main.url(forResource: "Hostpane", withExtension: "icns"),
            let image = NSImage(contentsOf: url) {
             NSApplication.shared.applicationIconImage = image
         }
@@ -27,6 +27,14 @@ struct HostpaneApp: App {
                     model.beginAddHost()
                 }
                 .keyboardShortcut("n", modifiers: [.command])
+            }
+            CommandGroup(after: .help) {
+                Button("打开应用日志") {
+                    model.logger.openInEditor()
+                }
+                Button("在 Finder 中显示日志") {
+                    model.logger.revealInFinder()
+                }
             }
         }
         .defaultSize(width: 1200, height: 780)

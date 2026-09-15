@@ -17,6 +17,15 @@ struct SidebarView: View {
                     .tag(SidebarItem.sshKeys)
             }
 
+            Section("工具箱") {
+                Label {
+                    Text("Docker")
+                } icon: {
+                    DockerWhaleIcon(size: 15)
+                }
+                .tag(SidebarItem.dockerHome)
+            }
+
             Section("终端") {
                 if model.activeSessions.isEmpty {
                     Label("无会话", systemImage: "rectangle.dashed")

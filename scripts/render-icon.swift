@@ -2,10 +2,11 @@
 import AppKit
 import Foundation
 
-// Dark squircle, pink-to-blue ring, white rocket. Keep the system icns
-// transparent margin so Dock/Finder size matches other Mac apps.
+// Dark squircle, pink-to-blue ring, white rocket.
+// Fill the 1024 canvas. A transparent margin becomes a black square in
+// Command-Tab (the switcher does not apply the Dock's icon mask).
 let canvas = CGFloat(1024)
-let margin = canvas * (28.0 / 256.0)
+let margin = CGFloat(0)
 let inner = NSRect(x: margin, y: margin, width: canvas - margin * 2, height: canvas - margin * 2)
 let cornerRadius = inner.width * 0.223
 let ringWidth = inner.width * 0.078
@@ -35,20 +36,13 @@ context.imageInterpolation = .high
 NSGraphicsContext.current = context
 
 let bounds = NSRect(x: 0, y: 0, width: canvas, height: canvas)
-NSColor.clear.setFill()
+// Opaque fill so Command-Tab does not composite transparent corners as black.
+NSColor(srgbRed: 0.10, green: 0.10, blue: 0.11, alpha: 1).setFill()
 bounds.fill()
 
 let squircle = NSBezierPath(roundedRect: inner, xRadius: cornerRadius, yRadius: cornerRadius)
 
-let shadow = NSShadow()
-shadow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.42)
-shadow.shadowBlurRadius = canvas * 0.04
-shadow.shadowOffset = NSSize(width: 0, height: -canvas * 0.016)
-NSGraphicsContext.current?.saveGraphicsState()
-shadow.set()
-NSColor.black.setFill()
-squircle.fill()
-NSGraphicsContext.current?.restoreGraphicsState()
+// No drop shadow: it would clip at the canvas edge and show up in Cmd-Tab.
 
 let pink = NSColor(srgbRed: 1.00, green: 0.28, blue: 0.72, alpha: 1)
 let violet = NSColor(srgbRed: 0.62, green: 0.38, blue: 1.00, alpha: 1)

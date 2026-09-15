@@ -42,6 +42,10 @@ public struct LinuxMetricsProbe {
       cpu_model=$(uname -m)
     fi
     echo "cpu_model=$cpu_model ($(uname -m))"
+    echo "docker_engine=$(docker version --format '{{.Server.Version}}' 2>/dev/null || true)"
+    echo "docker_images=$(docker images -q 2>/dev/null | wc -l | tr -d ' ')"
+    echo "docker_running=$(docker ps -q 2>/dev/null | wc -l | tr -d ' ')"
+    echo "docker_stopped=$(docker ps -aq -f status=exited 2>/dev/null | wc -l | tr -d ' ')"
     echo HP_STAT
     if [ -r /proc/stat ]; then
       grep '^cpu' /proc/stat
@@ -274,6 +278,10 @@ public struct LinuxMetricsParser {
             diskWriteBytesPerSecond: diskWriteRate,
             processes: processes,
             containers: containers,
+            dockerEngineVersion: sections.field("docker_engine") ?? "",
+            dockerImageCount: Int(sections.field("docker_images") ?? "") ?? 0,
+            dockerRunningCount: Int(sections.field("docker_running") ?? "") ?? 0,
+            dockerStoppedCount: Int(sections.field("docker_stopped") ?? "") ?? 0,
             sampledAt: date
         )
     }

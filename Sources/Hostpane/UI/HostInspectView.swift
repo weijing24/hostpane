@@ -68,6 +68,12 @@ struct HostInspectView: View {
                     Image(systemName: "folder")
                 }
                 .help("SFTP")
+                Button {
+                    model.openDocker(record)
+                } label: {
+                    DockerWhaleIcon(size: 14)
+                }
+                .help("Docker")
             }
             ToolbarItem {
                 Menu {

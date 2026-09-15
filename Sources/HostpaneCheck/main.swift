@@ -459,6 +459,7 @@ func settingsCodableChecks() throws {
     try expect(empty.terminalFontSize == 13, "font size default")
     try expect(empty.terminalCursorBlink, "cursor blink default")
     try expect(empty.terminalScrollbar == .overlay, "scrollbar default")
+    try expect(empty.appLoggingEnabled, "logging default")
 
     var settings = AppSettings(connectionTimeoutSeconds: 3, terminalKeepAliveSeconds: 999)
     try expect(settings.connectionTimeoutSeconds == 5, "timeout clamp low")
@@ -545,6 +546,157 @@ func dashboardOrderChecks() throws {
     )
 }
 
+func dockerParserChecks() throws {
+    let detect = """
+    HP_BEGIN
+    docker_bin=/usr/bin/docker
+    context=default
+    socket=/var/run/docker.sock
+    socket_writable=/var/run/docker.sock
+    HP_VERSION
+    29.7.2|1.55|linux|amd64
+    HP_INFO
+    Ubuntu 24.04.4 LTS|x86_64|2|1000000000
+    HP_END
+    """
+    let engine = try DockerParser().parseDetect(detect)
+    try expect(engine.version == "29.7.2", "engine version")
+    try expect(engine.apiVersion == "1.55", "api")
+    try expect(engine.socket == "/var/run/docker.sock", "socket")
+    try expect(engine.socketWritable, "writable")
+
+    let snapshotText = """
+    HP_BEGIN
+    docker_bin=/usr/bin/docker
+    context=default
+    socket=/var/run/docker.sock
+    socket_writable=/var/run/docker.sock
+    HP_VERSION
+    29.7.2|1.55|linux|amd64
+    HP_INFO
+    Ubuntu 24.04.4 LTS|x86_64|2|1000000000
+    HP_DF
+    Images|35|10|16.5GB|6.24GB (37%)
+    Containers|9|7|1.95MB|0B (0%)
+    Local Volumes|4|2|114MB|0B
+    Build Cache|12|0|480MB|480MB
+    HP_PS
+    abc123|gitlab-runner|gitlab/gitlab-runner:latest|running|Up 3 hours|
+    def456|ss-server-10086|ss:latest|exited|Exited (0) 2 hours ago|
+    HP_STATS
+    gitlab-runner|131.6%|12.00%|34.4MiB / 954MiB|1B / 1B|1B / 1B
+    HP_IMAGES
+    sha256:1|ubuntu|24.04|80MB|3 days ago
+    HP_VOLUMES
+    data|local|/var/lib/docker/volumes/data
+    HP_NETWORKS
+    net1|bridge|bridge|local
+    HP_COMPOSE
+    demo|running(2)|/opt/demo/compose.yml
+    HP_EVENTS
+    1710000000|container|start|gitlab-runner
+    HP_END
+    """
+    let snapshot = try DockerParser().parseSnapshot(snapshotText)
+    try expect(snapshot.runningCount == 1, "running")
+    try expect(snapshot.stoppedCount == 1, "stopped")
+    try expect(snapshot.images.count == 1, "images")
+    try expect(snapshot.disk.images.count == 35, "df images")
+    try expect(abs((snapshot.disk.images.reclaimablePercent ?? 0) - 0.37) < 0.01, "reclaimable percent")
+    try expect((snapshot.containers.first?.cpuRatio ?? 0) > 1, "cpu uncapped")
+    try expect(parseDockerSize("6.24GB (37%)") == 6_240_000_000, "docker size paren")
+
+    let inspectText = """
+    HP_BEGIN
+    docker_bin=/usr/bin/docker
+    HP_VERSION
+    29.7.2|1.55|linux|amd64
+    HP_PS
+    c6b7311376e3|beszel-agent|henrygd/beszel-agent:0.19.0|running|Up 9 hours (healthy)|
+    HP_INSPECT
+    [{"Id":"c6b7311376e3abcdef","Name":"/beszel-agent","Created":"2026-09-15T07:41:00Z","Config":{"Image":"henrygd/beszel-agent:0.19.0","Cmd":["/agent"],"Env":["FOO=1","BAR=2"],"Labels":{"com.docker.compose.project":"beszel","com.docker.compose.service":"beszel-agent-jp01"}},"State":{"Status":"running","Pid":10,"Health":{"Status":"healthy"}},"HostConfig":{"RestartPolicy":{"Name":"unless-stopped"},"NetworkMode":"host"},"Mounts":[{"Source":"/etc/machine-id","Destination":"/etc/machine-id","RW":false,"Type":"bind"}]}]
+    HP_END
+    """
+    let inspected = try DockerParser().parseSnapshot(inspectText)
+    let agent = inspected.containers[0]
+    try expect(agent.isHealthy, "healthy")
+    try expect(agent.composeProject == "beszel", "compose project")
+    try expect(agent.command == "/agent", "command")
+    try expect(agent.mounts.count == 1 && agent.mounts[0].readOnly, "ro mount")
+    try expect(agent.pid == 10, "pid")
+
+    let fast = try DockerParser().parseSnapshot("""
+    HP_BEGIN
+    HP_PS
+    abc123|gitlab-runner|gitlab/gitlab-runner:latest|running|Up 3 hours (healthy)|0.0.0.0:8080->80/tcp|2026-09-15 15:41:00 +0800 CST|com.docker.compose.project=demo,com.docker.compose.service=runner
+    HP_END
+    """)
+    try expect(fast.engine.version.isEmpty, "fast snapshot has no engine")
+    try expect(fast.containers.count == 1, "fast ps")
+    try expect(fast.containers[0].isHealthy, "health from status")
+    try expect(fast.containers[0].composeProject == "demo", "compose from labels")
+
+    let images = try DockerParser().parseSnapshot("""
+    HP_BEGIN
+    HP_IMAGES
+    00c88600e7d1|henrygd/beszel-agent|0.19.0|13.8MB|2 weeks ago|sha256:00c88600e7d1deadbeef
+    1ca4906c0d96|<none>|<none>|342MB|4 weeks ago|<none>
+    HP_PS
+    abc|beszel-agent|henrygd/beszel-agent:0.19.0|running|Up 9 hours (healthy)|
+    HP_END
+    """)
+    try expect(images.images.count == 2, "two images")
+    try expect(images.images[0].displayName == "henrygd/beszel-agent:0.19.0", "named image")
+    try expect(images.images[1].isDangling, "dangling")
+    try expect(images.images[1].displayName == "<无>", "dangling title")
+    try expect(images.images[0].usedBy(images.containers).count == 1, "image in use")
+    try expect(images.images[1].usedBy(images.containers).isEmpty, "dangling unused")
+
+    let volumes = try DockerParser().parseSnapshot("""
+    HP_BEGIN
+    HP_PS
+    abc|boinc|img|running|Up 1 hour|||com.docker.compose.project=boinc|boinc_boinc-data-jp01
+    HP_VOLUMES
+    boinc_boinc-data-jp01|local|/var/lib/docker/volumes/boinc_boinc-data-jp01/_data
+    orphan|local|/var/lib/docker/volumes/orphan/_data
+    HP_END
+    """)
+    try expect(volumes.volumes.count == 2, "two volumes")
+    try expect(volumes.volumes[0].usedBy(volumes.containers).count == 1, "volume in use")
+    try expect(volumes.volumes[1].usedBy(volumes.containers).isEmpty, "volume unused")
+
+    let nets = try DockerParser().parseSnapshot("""
+    HP_BEGIN
+    HP_PS
+    a|beszel-agent|img|running|Up 1 hour|||||host
+    b|web|img|running|Up 1 hour|||||ss-server_default
+    HP_NETWORKS
+    16091f898ba6|ss-server_default|bridge|local
+    a7fd52949439|host|host|local
+    HP_NETINSPECT
+    [{"Name":"ss-server_default","Id":"16091f898ba6abcd","Driver":"bridge","Scope":"local","IPAM":{"Config":[{"Subnet":"172.18.0.0/16","Gateway":"172.18.0.1"}]}},{"Name":"host","Id":"a7fd52949439abcd","Driver":"host","Scope":"local","IPAM":{"Config":null}}]
+    HP_END
+    """)
+    try expect(nets.networks.count == 2, "two networks")
+    try expect(nets.networks[0].subnet == "172.18.0.0/16", "subnet")
+    try expect(nets.networks[0].gateway == "172.18.0.1", "gateway")
+    try expect(nets.networks[1].isBuiltin, "host builtin")
+    try expect(nets.networks[1].usedBy(nets.containers).count == 1, "host users")
+    try expect(nets.networks[0].usedBy(nets.containers).count == 1, "custom users")
+
+    let events = try DockerParser().parseSnapshot("""
+    HP_BEGIN
+    HP_EVENTS
+    {"Type":"container","Action":"exec_die","Actor":{"Attributes":{"image":"ss-server-ss-server-10000","name":"ss-server-10000"}},"time":1710000000}
+    {"Type":"container","Action":"exec_start: /bin/sh -c nc -z 127.0.0.1 10000","Actor":{"Attributes":{"image":"ss-server-ss-server-10000","name":"ss-server-10000"}},"time":1710000001}
+    HP_END
+    """)
+    try expect(events.events.count == 2, "two events")
+    try expect(events.events[0].title == "exec_die ss-server-10000", "exec_die title")
+    try expect(events.events[0].image.contains("ss-server"), "image")
+    try expect(events.events[1].action.contains("nc -z"), "exec_start command")
+}
+
 do {
     try metricsChecks()
     try latencyWindowChecks()
@@ -560,6 +712,7 @@ do {
     try metricBandChecks()
     try configSyncChecks()
     try keyFingerprintChecks()
+    try dockerParserChecks()
     print("HostpaneCheck passed")
 } catch {
     fputs("HostpaneCheck failed: \(error)\n", stderr)

@@ -49,6 +49,8 @@ struct ContentView: View {
             MachinesView()
         case .sshKeys:
             SSHKeysView()
+        case .dockerHome:
+            DockerRootView()
         case .terminalHome:
             TerminalHomeView()
         case .session(let id):

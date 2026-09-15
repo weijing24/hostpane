@@ -4,6 +4,7 @@ import Traversio
 public enum SSHKeepAliveMode: Sendable {
     case terminal
     case sftp
+    case docker
 }
 
 public struct SSHSecretOverrides: Sendable {
@@ -128,7 +129,7 @@ public actor SSHEngine {
             keepAliveSeconds = settings.terminalKeepAlive
                 ? settings.terminalKeepAliveSeconds
                 : Int(SSHKeepalivePolicy.defaultInterval)
-        case .sftp:
+        case .sftp, .docker:
             keepAliveSeconds = settings.sftpKeepAlive
                 ? settings.sftpKeepAliveSeconds
                 : Int(SSHKeepalivePolicy.defaultInterval)

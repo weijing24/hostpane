@@ -92,6 +92,7 @@ struct ConnectionLogLine: Identifiable, Equatable {
         case "transport", "connection": return "传输"
         case "authentication": return "认证"
         case "session": return "会话"
+        case "diagnostics": return "诊断"
         default: return "设置"
         }
     }

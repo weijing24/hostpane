@@ -7,7 +7,7 @@
     <key>CFBundleExecutable</key>
     <string>Hostpane</string>
     <key>CFBundleIconFile</key>
-    <string>AppIcon</string>
+    <string>Hostpane</string>
     <key>CFBundleIdentifier</key>
     <string>eu.jimwei.hostpane</string>
     <key>CFBundleInfoDictionaryVersion</key>
@@ -21,7 +21,7 @@
     <key>CFBundleShortVersionString</key>
     <string>0.1.0</string>
     <key>CFBundleVersion</key>
-    <string>5</string>
+    <string>7</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>NSHighResolutionCapable</key>

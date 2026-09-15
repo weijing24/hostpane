@@ -19,6 +19,8 @@ enum HostpaneTheme {
         return NSColor(srgbRed: 0.78, green: 0.76, blue: 1.0, alpha: 1)
     }))
     static let sftpTint = Color(red: 0.72, green: 0.90, blue: 0.78)
+    /// Saturated SFTP accent, matched to `accent` so the two circle buttons read at the same weight.
+    static let sftpAccent = Color(red: 0.18, green: 0.62, blue: 0.46)
     static let total = Color(red: 0.20, green: 0.62, blue: 0.98)
     static let online = Color(red: 0.22, green: 0.76, blue: 0.42)
     static let connecting = Color(red: 0.98, green: 0.72, blue: 0.16)
@@ -48,7 +50,7 @@ enum HostpaneTheme {
     }
     static let netUp = Color(red: 1.0, green: 0.55, blue: 0.22)
     static let netDown = Color(red: 0.22, green: 0.78, blue: 0.95)
-    static let docker = Color(red: 0.13, green: 0.62, blue: 0.93)
+    static let docker = Color(red: 0, green: 145 / 255, blue: 226 / 255)
     static let cpuUser = Color(red: 0.33, green: 0.72, blue: 0.98)
     static let cpuSystem = Color(red: 0.94, green: 0.36, blue: 0.36)
     static let cpuNice = Color(red: 0.35, green: 0.78, blue: 0.48)
