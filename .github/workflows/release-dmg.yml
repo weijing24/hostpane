@@ -49,14 +49,16 @@ jobs:
           build="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' Sources/Hostpane/Resources/Info.plist)"
           dmg="$(ls dist/Hostpane-*.dmg)"
           sha="$(git rev-parse --short HEAD)"
-          notes="Hostpane ${version} (build ${build}), commit ${sha}.
-
-Apple Silicon (arm64) DMG. Ad-hoc signed, not notarized.
-First launch: right-click Open, or xattr -cr /Applications/Hostpane.app
-
-Commit: ${GITHUB_SHA}"
+          {
+            echo "Hostpane ${version} (build ${build}), commit ${sha}."
+            echo
+            echo "Apple Silicon (arm64) DMG. Ad-hoc signed, not notarized."
+            echo "First launch: right-click Open, or xattr -cr /Applications/Hostpane.app"
+            echo
+            echo "Commit: ${GITHUB_SHA}"
+          } > /tmp/release-notes.md
           gh release delete latest --yes --cleanup-tag || true
           gh release create latest "$dmg" \
             --prerelease \
             --title "Hostpane ${version} (${sha})" \
-            --notes "$notes"
+            --notes-file /tmp/release-notes.md
