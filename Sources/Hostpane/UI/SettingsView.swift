@@ -65,15 +65,15 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
                     .labelStyle(.titleAndIcon)
             }
-            if model.configSyncNeedsRestart {
-                Text("已复制到新位置，请重新启动 Hostpane。")
+            if let notice = model.configSyncNotice {
+                Text(notice)
                     .font(.caption)
                     .foregroundStyle(.orange)
             }
         } header: {
             Text("数据同步")
         } footer: {
-            Text("主机簿、设置和密钥列表会放到 iCloud Drive 或 Dropbox 里由系统同步。密码留在本机钥匙串，不会上传。更改位置后需要重新启动应用才会生效。")
+            Text("主机簿、设置和密钥列表会放到 iCloud Drive 或 Dropbox 里由系统同步。密码留在本机钥匙串，不会上传。两台电脑同时改同一份列表时，后保存的会覆盖先保存的；切到已有数据的位置时会先问你保留哪边。")
         }
         .alert(
             "无法切换同步位置",
@@ -86,6 +86,35 @@ struct SettingsView: View {
         } message: {
             Text(model.configSyncError ?? "")
         }
+        .confirmationDialog(
+            "两边的数据不一样",
+            isPresented: Binding(
+                get: { model.configSyncPending != nil },
+                set: { if !$0 { model.cancelConfigSync() } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if joiningCloud {
+                Button(keepDestinationTitle) {
+                    model.confirmConfigSync(.keepDestination)
+                }
+                Button(keepSourceTitle, role: .destructive) {
+                    model.confirmConfigSync(.keepSource)
+                }
+            } else {
+                Button(keepSourceTitle) {
+                    model.confirmConfigSync(.keepSource)
+                }
+                Button(keepDestinationTitle) {
+                    model.confirmConfigSync(.keepDestination)
+                }
+            }
+            Button("取消", role: .cancel) {
+                model.cancelConfigSync()
+            }
+        } message: {
+            Text(conflictMessage)
+        }
     }
 
     private var syncDestinationBinding: Binding<ConfigSyncDestination> {
@@ -96,10 +125,32 @@ struct SettingsView: View {
     }
 
     private var syncStatusText: String {
-        if model.configSyncNeedsRestart {
-            return "等待重新启动"
+        ConfigSync.statusText(for: ConfigSync.destination)
+    }
+
+    private var joiningCloud: Bool {
+        guard let pending = model.configSyncPending else { return false }
+        return pending.destination != .local
+    }
+
+    private var keepDestinationTitle: String {
+        let title = model.configSyncPending?.destination.title ?? "目标"
+        return "使用\(title)已有的数据"
+    }
+
+    private var keepSourceTitle: String {
+        let title = model.configSyncPending?.destination.title ?? "目标"
+        if joiningCloud {
+            return "用当前数据覆盖\(title)"
         }
-        return ConfigSync.statusText(for: ConfigSync.destination)
+        return "把当前数据复制到\(title)"
+    }
+
+    private var conflictMessage: String {
+        guard let pending = model.configSyncPending else { return "" }
+        let current = ConfigSync.destination.title
+        let next = pending.destination.title
+        return "当前（\(current)）：\(pending.source.summaryLabel())。\(next)：\(pending.target.summaryLabel())。加入云端时建议保留那边已有的数据。"
     }
 
     @ViewBuilder

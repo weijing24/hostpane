@@ -232,6 +232,12 @@ final class HostRuntime {
     }
 }
 
+struct PendingConfigSync: Equatable {
+    var destination: ConfigSyncDestination
+    var source: ConfigSyncInventory
+    var target: ConfigSyncInventory
+}
+
 @MainActor
 @Observable
 final class AppModel {
@@ -256,7 +262,8 @@ final class AppModel {
     var sessionInspectorPresented = false
     var sessionInspectorTab: TerminalInspectorTab = .status
     var sessionFontSheetPresented = false
-    var configSyncNeedsRestart = false
+    var configSyncPending: PendingConfigSync?
+    var configSyncNotice: String?
     var configSyncError: String?
     let logger = AppLogger()
     private(set) var runtimes: [UUID: HostRuntime] = [:]
@@ -296,6 +303,7 @@ final class AppModel {
         }
         logger.enabled = settings.appLoggingEnabled
         logger.info("app", "Hostpane started hosts=\(hosts.count) logging=\(logger.enabled)")
+        refreshConflictNotice()
     }
 
     var selectedHost: HostRecord? {
@@ -431,11 +439,96 @@ final class AppModel {
 
     func setConfigSyncDestination(_ next: ConfigSyncDestination) {
         do {
-            try ConfigSync.apply(next)
-            configSyncNeedsRestart = true
-            configSyncError = nil
+            let plan = try ConfigSync.plan(switchingTo: next)
+            switch plan {
+            case .alreadyCurrent:
+                configSyncPending = nil
+                configSyncError = nil
+            case .switchOnly, .seedEmptyDestination:
+                try ConfigSync.apply(next)
+                configSyncPending = nil
+                configSyncError = nil
+                reloadSyncedData()
+                logger.info("app", "config sync -> \(next.rawValue)")
+            case .confirm(let source, let destination):
+                configSyncPending = PendingConfigSync(
+                    destination: next,
+                    source: source,
+                    target: destination
+                )
+                configSyncError = nil
+            }
         } catch {
             configSyncError = error.localizedDescription
+        }
+    }
+
+    func confirmConfigSync(_ choice: ConfigSyncChoice) {
+        guard let pending = configSyncPending else { return }
+        do {
+            try ConfigSync.apply(pending.destination, choice: choice)
+            configSyncPending = nil
+            configSyncError = nil
+            reloadSyncedData()
+            logger.info("app", "config sync -> \(pending.destination.rawValue) choice=\(String(describing: choice))")
+        } catch {
+            configSyncError = error.localizedDescription
+        }
+    }
+
+    func cancelConfigSync() {
+        configSyncPending = nil
+    }
+
+    func reloadSyncedData() {
+        do {
+            settings = try settingsStore.load()
+            logger.enabled = settings.appLoggingEnabled
+            applyAppearance()
+        } catch {
+            importMessage = "Could not load settings: \(error.localizedDescription)"
+        }
+        if editor == nil {
+            do {
+                hosts = try store.load()
+            } catch {
+                importMessage = "Could not load saved hosts: \(error.localizedDescription)"
+            }
+        }
+        do {
+            keys = try keyStore.load()
+        } catch {
+            importMessage = [
+                importMessage,
+                "Could not load saved keys: \(error.localizedDescription)"
+            ]
+            .compactMap { $0 }
+            .joined(separator: "\n")
+        }
+        refreshConflictNotice()
+    }
+
+    func reloadSyncedDataIfDiskChanged() {
+        refreshConflictNotice()
+        if let disk = try? settingsStore.load(), disk != settings {
+            settings = disk
+            logger.enabled = settings.appLoggingEnabled
+            applyAppearance()
+        }
+        if editor == nil, let disk = try? store.load(), disk != hosts {
+            hosts = disk
+        }
+        if let disk = try? keyStore.load(), disk != keys {
+            keys = disk
+        }
+    }
+
+    func refreshConflictNotice() {
+        let names = ConfigSync.conflictCopyNames(in: ConfigSync.activeDirectory())
+        if names.isEmpty {
+            configSyncNotice = nil
+        } else {
+            configSyncNotice = "发现冲突副本：\(names.joined(separator: "、"))。Hostpane 只用原文件名，请核对后删掉冲突副本。"
         }
     }
 

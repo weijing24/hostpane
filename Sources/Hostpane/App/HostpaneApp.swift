@@ -18,6 +18,9 @@ struct HostpaneApp: App {
                 .environment(model)
                 .preferredColorScheme(model.settings.appearance.colorScheme)
                 .onAppear { model.applyAppearance() }
+                .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                    model.reloadSyncedDataIfDiskChanged()
+                }
                 .frame(minWidth: 960, minHeight: 640)
         }
         .windowToolbarStyle(.unified)

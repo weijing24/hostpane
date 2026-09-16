@@ -10,23 +10,22 @@ public actor FileHostKeyStore: SSHHostKeyTrustStore {
         var key: Data
     }
 
-    private let url: URL
-    private var rows: [Row]
+    private let overrideURL: URL?
+    private var rows: [Row] = []
 
-    public init(url: URL = HostStore.applicationSupportDirectory().appendingPathComponent("known-hosts.json")) {
-        self.url = url
-        if let data = try? Data(contentsOf: url),
-           let decoded = try? JSONDecoder().decode([Row].self, from: data) {
-            self.rows = decoded
-        } else {
-            self.rows = []
-        }
+    public init(url: URL? = nil) {
+        overrideURL = url
+    }
+
+    private var url: URL {
+        overrideURL ?? HostStore.applicationSupportDirectory().appendingPathComponent("known-hosts.json")
     }
 
     public func lookupHostKey(
         endpointHost: String,
         endpointPort: UInt16
     ) async throws -> SSHTrustedHostKey? {
+        loadFromDisk()
         guard let row = rows.first(where: { $0.host == endpointHost && $0.port == endpointPort }) else {
             return nil
         }
@@ -34,6 +33,7 @@ public actor FileHostKeyStore: SSHHostKeyTrustStore {
     }
 
     public func storeHostKey(_ request: SSHHostKeyStoreRequest) async throws {
+        loadFromDisk()
         let row = Row(
             host: request.endpointHost,
             port: request.endpointPort,
@@ -47,12 +47,18 @@ public actor FileHostKeyStore: SSHHostKeyTrustStore {
         try persist()
     }
 
+    private func loadFromDisk() {
+        if let data = try? SyncedJSON.read(from: url),
+           !data.isEmpty,
+           let decoded = try? JSONDecoder().decode([Row].self, from: data) {
+            rows = decoded
+        } else {
+            rows = []
+        }
+    }
+
     private func persist() throws {
-        try FileManager.default.createDirectory(
-            at: url.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
         let data = try JSONEncoder().encode(rows)
-        try data.write(to: url, options: [.atomic])
+        try SyncedJSON.write(data, to: url)
     }
 }

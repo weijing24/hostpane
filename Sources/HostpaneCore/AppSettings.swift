@@ -251,34 +251,26 @@ public enum DashboardHostOrder {
 }
 
 public struct SettingsStore: Sendable {
-    public let fileURL: URL
+    private let overrideURL: URL?
+
+    public var fileURL: URL {
+        overrideURL ?? Self.defaultFileURL()
+    }
 
     public init(fileURL: URL? = nil) {
-        if let fileURL {
-            self.fileURL = fileURL
-        } else {
-            self.fileURL = Self.defaultFileURL()
-        }
+        overrideURL = fileURL
     }
 
     public func load() throws -> AppSettings {
-        let url = fileURL
-        guard FileManager.default.fileExists(atPath: url.path) else { return AppSettings() }
-        let data = try Data(contentsOf: url)
-        if data.isEmpty { return AppSettings() }
+        guard let data = try SyncedJSON.read(from: fileURL), !data.isEmpty else { return AppSettings() }
         return try JSONDecoder().decode(AppSettings.self, from: data)
     }
 
     public func save(_ settings: AppSettings) throws {
-        let url = fileURL
-        try FileManager.default.createDirectory(
-            at: url.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
         var next = settings
         next.clamp()
         let data = try JSONEncoder().encode(next)
-        try data.write(to: url, options: [.atomic])
+        try SyncedJSON.write(data, to: fileURL)
     }
 
     public static func defaultFileURL() -> URL {

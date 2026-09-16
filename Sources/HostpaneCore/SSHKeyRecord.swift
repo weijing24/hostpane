@@ -116,25 +116,23 @@ public struct SSHKeyRecord: Identifiable, Codable, Hashable, Sendable {
 }
 
 public struct KeyStore: Sendable {
-    public let fileURL: URL
+    private let overrideURL: URL?
+
+    public var fileURL: URL {
+        overrideURL ?? HostStore.applicationSupportDirectory().appendingPathComponent("keys.json")
+    }
 
     public init(fileURL: URL? = nil) {
-        self.fileURL = fileURL ?? HostStore.applicationSupportDirectory().appendingPathComponent("keys.json")
+        overrideURL = fileURL
     }
 
     public func load() throws -> [SSHKeyRecord] {
-        guard FileManager.default.fileExists(atPath: fileURL.path) else { return [] }
-        let data = try Data(contentsOf: fileURL)
-        if data.isEmpty { return [] }
+        guard let data = try SyncedJSON.read(from: fileURL), !data.isEmpty else { return [] }
         return try JSONDecoder().decode([SSHKeyRecord].self, from: data)
     }
 
     public func save(_ keys: [SSHKeyRecord]) throws {
-        try FileManager.default.createDirectory(
-            at: fileURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
         let data = try JSONEncoder().encode(keys)
-        try data.write(to: fileURL, options: [.atomic])
+        try SyncedJSON.write(data, to: fileURL)
     }
 }

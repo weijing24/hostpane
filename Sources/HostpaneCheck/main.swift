@@ -493,7 +493,6 @@ func settingsCodableChecks() throws {
 func configSyncChecks() throws {
     try expect(ConfigSync.syncedFileNames.contains("hosts.json"), "hosts file")
     try expect(ConfigSync.syncedFileNames.contains("settings.json"), "settings file")
-    try expect(ConfigSync.destination == ConfigSync.destination, "destination readable")
     try expect(ConfigSync.statusText(for: .local) == "同步未开始", "local status")
     if ConfigSync.dropboxRoot() != nil {
         let url = try ConfigSync.directory(for: .dropbox)
@@ -503,6 +502,104 @@ func configSyncChecks() throws {
             "dropbox lives under Apps \(url.path)"
         )
     }
+
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("hostpane-sync-\(UUID().uuidString)")
+    let source = root.appendingPathComponent("source")
+    let dest = root.appendingPathComponent("dest")
+    try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    switch ConfigSync.plan(from: source, to: dest) {
+    case .switchOnly:
+        break
+    default:
+        throw CheckFailure.message("empty to empty should switchOnly")
+    }
+
+    let alpha = HostRecord(name: "alpha", hostname: "alpha.example", username: "ubuntu")
+    try HostStore(fileURL: source.appendingPathComponent("hosts.json")).save([alpha])
+    switch ConfigSync.plan(from: source, to: dest) {
+    case .seedEmptyDestination:
+        break
+    default:
+        throw CheckFailure.message("source data into empty dest should seed")
+    }
+    try ConfigSync.execute(from: source, to: dest, choice: nil)
+    let seeded = try HostStore(fileURL: dest.appendingPathComponent("hosts.json")).load()
+    try expect(seeded.count == 1 && seeded[0].name == "alpha", "seeded host")
+
+    let emptySource = root.appendingPathComponent("empty-source")
+    try FileManager.default.createDirectory(at: emptySource, withIntermediateDirectories: true)
+    switch ConfigSync.plan(from: emptySource, to: dest) {
+    case .switchOnly:
+        break
+    default:
+        throw CheckFailure.message("empty source must not overwrite dest")
+    }
+    try ConfigSync.execute(from: emptySource, to: dest, choice: nil)
+    let preserved = try HostStore(fileURL: dest.appendingPathComponent("hosts.json")).load()
+    try expect(preserved.count == 1 && preserved[0].name == "alpha", "dest preserved")
+
+    let beta = HostRecord(name: "beta", hostname: "beta.example", username: "ubuntu")
+    try HostStore(fileURL: emptySource.appendingPathComponent("hosts.json")).save([beta])
+    try SettingsStore(fileURL: dest.appendingPathComponent("settings.json")).save(AppSettings(appearance: .dark))
+    switch ConfigSync.plan(from: emptySource, to: dest) {
+    case .confirm(let sourceInventory, let destinationInventory):
+        try expect(sourceInventory.hostCount == 1, "confirm source hosts")
+        try expect(destinationInventory.hostCount == 1, "confirm dest hosts")
+        try expect(destinationInventory.hasSettings, "confirm dest settings")
+    default:
+        throw CheckFailure.message("different data should confirm")
+    }
+
+    do {
+        try ConfigSync.execute(from: emptySource, to: dest, choice: nil)
+        throw CheckFailure.message("confirm without choice should throw")
+    } catch ConfigSyncError.confirmationRequired {
+        ()
+    } catch {
+        throw CheckFailure.message("wrong error \(error)")
+    }
+
+    try ConfigSync.execute(from: emptySource, to: dest, choice: .keepDestination)
+    let kept = try HostStore(fileURL: dest.appendingPathComponent("hosts.json")).load()
+    try expect(kept[0].name == "alpha", "keep dest hosts")
+    let keptSettings = try SettingsStore(fileURL: dest.appendingPathComponent("settings.json")).load()
+    try expect(keptSettings.appearance == .dark, "keep dest settings")
+
+    try ConfigSync.execute(from: emptySource, to: dest, choice: .keepSource)
+    let overwritten = try HostStore(fileURL: dest.appendingPathComponent("hosts.json")).load()
+    try expect(overwritten[0].name == "beta", "keep source hosts")
+    try expect(
+        !FileManager.default.fileExists(atPath: dest.appendingPathComponent("settings.json").path),
+        "keep source removes dest-only files"
+    )
+
+    let clone = root.appendingPathComponent("clone")
+    try FileManager.default.createDirectory(at: clone, withIntermediateDirectories: true)
+    try ConfigSync.execute(from: dest, to: clone, choice: nil)
+    switch ConfigSync.plan(from: dest, to: clone) {
+    case .switchOnly:
+        break
+    default:
+        throw CheckFailure.message("equivalent files should switchOnly")
+    }
+
+    let conflictName = "hosts.json (Air 的冲突副本 2026-09-16)"
+    try Data("x".utf8).write(to: dest.appendingPathComponent(conflictName))
+    let names = ConfigSync.conflictCopyNames(in: dest)
+    try expect(names.contains(conflictName), "conflict copy detected")
+
+    let rebound = HostStore()
+    try expect(
+        rebound.fileURL.lastPathComponent == "hosts.json",
+        "default host store still resolves hosts.json"
+    )
+    try expect(
+        rebound.fileURL.deletingLastPathComponent().path == HostStore.applicationSupportDirectory().path,
+        "default host store follows active directory"
+    )
 }
 
 func metricBandChecks() throws {

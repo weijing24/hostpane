@@ -2,14 +2,22 @@
 import AppKit
 import Foundation
 
-// Dark squircle, pink-to-blue ring, white rocket.
-// Fill the 1024 canvas. A transparent margin becomes a black square in
-// Command-Tab (the switcher does not apply the Dock's icon mask).
+// Baked squircle with transparent corners. This app ships an icns (no
+// Assets.car / Icon Composer), and macOS Tahoe leaves that unmasked — a
+// full-bleed square therefore shows as a square in the Dock. The ring
+// follows the squircle; do not fill the corner pixels.
+
 let canvas = CGFloat(1024)
-let margin = CGFloat(0)
-let inner = NSRect(x: margin, y: margin, width: canvas - margin * 2, height: canvas - margin * 2)
-let cornerRadius = inner.width * 0.223
-let ringWidth = inner.width * 0.078
+let bounds = NSRect(x: 0, y: 0, width: canvas, height: canvas)
+let ringWidth = canvas * 0.078
+let squircleN = CGFloat(5)
+
+let args = Array(CommandLine.arguments.dropFirst())
+let readme = args.contains("--readme")
+let out = args.first(where: { $0 != "--readme" })
+    ?? (readme
+        ? "Sources/Hostpane/Resources/AppIcon-readme.png"
+        : "Sources/Hostpane/Resources/AppIcon-1024.png")
 
 guard let bitmap = NSBitmapImageRep(
     bitmapDataPlanes: nil,
@@ -35,24 +43,17 @@ guard let context = NSGraphicsContext(bitmapImageRep: bitmap) else {
 context.imageInterpolation = .high
 NSGraphicsContext.current = context
 
-let bounds = NSRect(x: 0, y: 0, width: canvas, height: canvas)
-// Opaque fill so Command-Tab does not composite transparent corners as black.
-NSColor(srgbRed: 0.10, green: 0.10, blue: 0.11, alpha: 1).setFill()
-bounds.fill()
-
-let squircle = NSBezierPath(roundedRect: inner, xRadius: cornerRadius, yRadius: cornerRadius)
-
-// No drop shadow: it would clip at the canvas edge and show up in Cmd-Tab.
-
 let pink = NSColor(srgbRed: 1.00, green: 0.28, blue: 0.72, alpha: 1)
 let violet = NSColor(srgbRed: 0.62, green: 0.38, blue: 1.00, alpha: 1)
 let blue = NSColor(srgbRed: 0.20, green: 0.52, blue: 1.00, alpha: 1)
 let cyan = NSColor(srgbRed: 0.22, green: 0.68, blue: 1.00, alpha: 1)
-NSGradient(colors: [pink, violet, blue, cyan])!.draw(in: squircle, angle: -40)
+let gradient = NSGradient(colors: [pink, violet, blue, cyan])!
 
-let plate = inner.insetBy(dx: ringWidth, dy: ringWidth)
-let plateRadius = max(plate.width * 0.223, 1)
-let platePath = NSBezierPath(roundedRect: plate, xRadius: plateRadius, yRadius: plateRadius)
+let outer = squirclePath(in: bounds, n: squircleN)
+gradient.draw(in: outer, angle: -40)
+
+let plateRect = bounds.insetBy(dx: ringWidth, dy: ringWidth)
+let platePath = squirclePath(in: plateRect, n: squircleN)
 
 NSGraphicsContext.current?.saveGraphicsState()
 platePath.addClip()
@@ -64,15 +65,15 @@ NSGradient(
         NSColor(srgbRed: 0.10, green: 0.10, blue: 0.11, alpha: 0)
     ]
 )!.draw(
-    from: NSPoint(x: plate.minX, y: plate.maxY),
-    to: NSPoint(x: plate.midX + plate.width * 0.08, y: plate.midY),
+    from: NSPoint(x: plateRect.minX, y: plateRect.maxY),
+    to: NSPoint(x: plateRect.midX + plateRect.width * 0.08, y: plateRect.midY),
     options: []
 )
 NSGraphicsContext.current?.restoreGraphicsState()
 
 let rocket = rocketPath()
 let rocketBox = NSRect(x: 0, y: 0, width: 100, height: 160)
-let targetHeight = plate.width * 0.50
+let targetHeight = plateRect.width * 0.50
 let scale = targetHeight / rocketBox.height
 var transform = AffineTransform()
 transform.translate(x: canvas * 0.445, y: canvas * 0.512)
@@ -84,10 +85,10 @@ NSColor.white.setFill()
 rocket.fill()
 
 let rocketBounds = rocket.bounds
-let dashWidth = plate.width * 0.125
-let dashHeight = plate.width * 0.052
+let dashWidth = plateRect.width * 0.125
+let dashHeight = plateRect.width * 0.052
 let dashRect = NSRect(
-    x: rocketBounds.maxX + plate.width * 0.055,
+    x: rocketBounds.maxX + plateRect.width * 0.055,
     y: rocketBounds.midY - dashHeight / 2,
     width: dashWidth,
     height: dashHeight
@@ -101,15 +102,35 @@ guard let png = bitmap.representation(using: .png, properties: [:]) else {
     exit(1)
 }
 
-let out = CommandLine.arguments.count > 1
-    ? CommandLine.arguments[1]
-    : "Sources/Hostpane/Resources/AppIcon-1024.png"
 try FileManager.default.createDirectory(
     at: URL(fileURLWithPath: out).deletingLastPathComponent(),
     withIntermediateDirectories: true
 )
 try png.write(to: URL(fileURLWithPath: out))
-print("Wrote \(out), margin \(Int(margin))")
+print("Wrote \(out)")
+
+func squirclePath(in rect: NSRect, n: CGFloat) -> NSBezierPath {
+    let path = NSBezierPath()
+    let a = rect.width / 2
+    let b = rect.height / 2
+    let cx = rect.midX
+    let cy = rect.midY
+    let steps = 360
+    for i in 0...steps {
+        let t = CGFloat(i) / CGFloat(steps) * 2 * .pi
+        let cosT = cos(t)
+        let sinT = sin(t)
+        let x = cx + a * pow(abs(cosT), 2 / n) * (cosT >= 0 ? 1 : -1)
+        let y = cy + b * pow(abs(sinT), 2 / n) * (sinT >= 0 ? 1 : -1)
+        if i == 0 {
+            path.move(to: NSPoint(x: x, y: y))
+        } else {
+            path.line(to: NSPoint(x: x, y: y))
+        }
+    }
+    path.close()
+    return path
+}
 
 func rocketPath() -> NSBezierPath {
     let path = NSBezierPath()

@@ -1,7 +1,7 @@
 # Hostpane
 
 <p align="center">
-  <img src="Sources/Hostpane/Resources/AppIcon-1024.png" width="128" height="128" alt="Hostpane">
+  <img src="Sources/Hostpane/Resources/AppIcon-readme.png" width="128" height="128" alt="Hostpane">
 </p>
 
 # Monitor, connect, and run your servers.
