@@ -15,44 +15,9 @@ for arg in "$@"; do
   esac
 done
 
-if ! command -v metal >/dev/null 2>&1 && ! xcrun --find metal >/dev/null 2>&1; then
-  # Command Line Tools has no `metal`. SwiftTerm's .metal resource still needs a
-  # compiler during the Swift Build graph; stubs satisfy the graph. The packaged
-  # app does not ship that metallib (package copies only Hostpane + icon).
-  stub_dir="$root/.build/hostpane-tool-stubs"
-  mkdir -p "$stub_dir"
-  cat > "$stub_dir/metal" <<'EOF'
-#!/bin/sh
-write_empty() {
-  if [ -n "$1" ]; then
-    mkdir -p "$(dirname "$1")"
-    : > "$1"
-  fi
-}
-out=""
-deps=""
-dia=""
-prev=""
-for arg in "$@"; do
-  case "$prev" in
-    -o) out="$arg" ;;
-    -MF) deps="$arg" ;;
-    -serialize-diagnostics) dia="$arg" ;;
-  esac
-  prev="$arg"
-done
-write_empty "$out"
-write_empty "$dia"
-if [ -n "$deps" ]; then
-  mkdir -p "$(dirname "$deps")"
-  printf '%s: \n' "${out:-Shaders.air}" > "$deps"
-fi
-exit 0
-EOF
-  cp "$stub_dir/metal" "$stub_dir/metallib"
-  chmod +x "$stub_dir/metal" "$stub_dir/metallib"
-  export PATH="$stub_dir:$PATH"
-fi
+# shellcheck disable=SC1091
+. "$root/scripts/lib/clt-metal-stubs.sh"
+hostpane_setup_clt_metal_stubs "$root"
 
 swift build -c release --product Hostpane
 bin_dir="$(swift build -c release --show-bin-path)"

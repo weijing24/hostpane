@@ -83,13 +83,16 @@ Hostpane has no servers of its own. This Mac talks straight to yours.
 - Swift 6.2+ command line tools
 - GitHub SSH access (`git@github.com`) for package resolve
 
-Full Xcode is not required.
+Full Xcode is not required. Command Line Tools is enough. On CLT 27,
+`package-app.sh` pins the macOS 26 SDK and the native SwiftPM backend
+because SDK 27's `@State` macro (`SwiftUIMacros`) is not in CLT.
+SwiftTerm's `.metal` shader is satisfied by stubs (including `xcrun metal`).
 
 ## Run
 
 ```bash
 cd hostpane
-swift run HostpaneCheck
+./scripts/with-clt-stubs.sh swift run HostpaneCheck
 ./scripts/package-app.sh
 open /Applications/Hostpane.app
 ```
@@ -97,7 +100,7 @@ open /Applications/Hostpane.app
 Debug without bundling:
 
 ```bash
-swift run Hostpane
+./scripts/with-clt-stubs.sh swift run Hostpane
 ```
 
 ## Disk image
