@@ -85,6 +85,7 @@ jobs:
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $ver" "$plist"
           echo "ver=$ver" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "prev=${last:-}" >> "$GITHUB_OUTPUT"
           echo "Releasing $tag (bump=$bump, previous=${last:-none})"
 
       - name: Run HostpaneCheck
@@ -99,13 +100,38 @@ jobs:
         run: |
           set -euo pipefail
           tag="${{ steps.version.outputs.tag }}"
-          ver="${{ steps.version.outputs.ver }}"
+          prev="${{ steps.version.outputs.prev }}"
           dmg="$(ls dist/Hostpane-*.dmg)"
+          notes="${RUNNER_TEMP}/release-notes.md"
+          {
+            echo "## What's Changed"
+            if [ -n "$prev" ]; then
+              git log --pretty=format:'- %s' "${prev}..HEAD"
+            else
+              git log --pretty=format:'- %s'
+            fi | sed 's/\.$//'
+            echo
+            echo
+            if [ -n "$prev" ]; then
+              echo "**Full Changelog**: https://github.com/${GITHUB_REPOSITORY}/compare/${prev}...${tag}"
+            fi
+          } > "$notes"
+          if ! grep -q '^- ' "$notes"; then
+            subject="$(git log -1 --pretty=format:'%s' | sed 's/\.$//')"
+            {
+              echo "## What's Changed"
+              echo "- ${subject}"
+              echo
+              if [ -n "$prev" ]; then
+                echo "**Full Changelog**: https://github.com/${GITHUB_REPOSITORY}/compare/${prev}...${tag}"
+              fi
+            } > "$notes"
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "$tag" -m "$tag"
           git push origin "$tag"
           gh release create "$tag" "$dmg" \
             --title "$tag" \
-            --generate-notes \
+            --notes-file "$notes" \
             --latest

@@ -105,7 +105,7 @@ Debug without bundling:
 
 ## Disk image
 
-Every push to `main` cuts a new GitHub Release (`v0.1.0`, `v0.1.1`, …) with an Apple Silicon DMG and generated notes. Use **Actions → Release DMG → Run workflow** to bump minor or major instead of patch.
+Every push to `main` cuts a new GitHub Release (`v0.1.0`, `v0.1.1`, …) with an Apple Silicon DMG and a What's Changed list from commits since the previous tag. Use **Actions → Release DMG → Run workflow** to bump minor or major instead of patch.
 
 ```bash
 ./scripts/package-dmg.sh
