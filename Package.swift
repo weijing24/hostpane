@@ -11,8 +11,8 @@ let package = Package(
         .executable(name: "Hostpane", targets: ["Hostpane"])
     ],
     dependencies: [
-        .package(url: "git@github.com:GitSwiftHQ/Traversio.git", from: "1.0.8"),
-        .package(url: "git@github.com:migueldeicaza/SwiftTerm.git", from: "1.20.0")
+        .package(url: "https://github.com/GitSwiftHQ/Traversio.git", from: "1.0.8"),
+        .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.20.0")
     ],
     targets: [
         .target(

@@ -1,5 +1,5 @@
 {
-  "originHash" : "73151f70b87637d6af898de5717151d189215ae9c25254a5b8f6acba054c5a41",
+  "originHash" : "aab780def907587d6da7039072d6235b7499834e6393807791d6f6d37cb0a962",
   "pins" : [
     {
       "identity" : "swift-argument-parser",
@@ -13,7 +13,7 @@
     {
       "identity" : "swiftterm",
       "kind" : "remoteSourceControl",
-      "location" : "git@github.com:migueldeicaza/SwiftTerm.git",
+      "location" : "https://github.com/migueldeicaza/SwiftTerm.git",
       "state" : {
         "revision" : "5d14406844143538cd8f8851d2d8a67c1fe443e5",
         "version" : "1.20.0"
@@ -22,7 +22,7 @@
     {
       "identity" : "traversio",
       "kind" : "remoteSourceControl",
-      "location" : "git@github.com:GitSwiftHQ/Traversio.git",
+      "location" : "https://github.com/GitSwiftHQ/Traversio.git",
       "state" : {
         "revision" : "f4d4b870152e88af8cde54514084a3f0c93afcad",
         "version" : "1.0.8"
