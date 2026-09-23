@@ -3,22 +3,26 @@ import HostpaneCore
 
 struct DashboardView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.colorScheme) private var colorScheme
     @State private var inspectedHostID: UUID?
     @State private var showingDashboardSort = false
 
     var body: some View {
         @Bindable var model = model
         NavigationStack {
-            ScrollView {
+            DashboardScrollBackdrop(
+                light: model.settings.dashboardBackgroundLight,
+                dark: model.settings.dashboardBackgroundDark,
+                isDark: useDarkBackground
+            ) {
                 VStack(alignment: .leading, spacing: 16) {
-                    filterRow
+                    if model.settings.showTagFilter {
+                        filterRow
+                    }
                     summaryRow
                     hostGrid
                 }
-                .padding(24)
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .background(HostpaneTheme.page)
             .navigationTitle("仪表板")
             .toolbar {
                 ToolbarItem {
@@ -60,6 +64,17 @@ struct DashboardView: View {
             }
         }
         .onAppear { model.startDashboardMonitors() }
+    }
+
+    private var useDarkBackground: Bool {
+        switch model.settings.appearance {
+        case .dark:
+            return true
+        case .light:
+            return false
+        case .system:
+            return colorScheme == .dark || model.isDarkAppearance
+        }
     }
 
     private var filterRow: some View {
@@ -366,29 +381,20 @@ private struct DashboardHostCard: View {
     }
 
     private var statusColor: Color {
-        switch runtime.reachability {
-        case .online:
-            if let latency = runtime.latencySeconds {
-                return HostpaneTheme.latencyColor(latency)
-            }
-            return HostpaneTheme.loadLow
-        case .connecting: return HostpaneTheme.connecting
-        case .offline: return HostpaneTheme.offline
-        }
+        HostStatusBadge.color(
+            reachability: runtime.reachability,
+            latency: runtime.latencySeconds,
+            showLatency: model.settings.showLatency,
+            useColor: model.settings.latencyUsesColor
+        )
     }
 
     private var statusText: String {
-        switch runtime.reachability {
-        case .online:
-            if let latency = runtime.latencySeconds {
-                return formatLatency(latency)
-            }
-            return "在线"
-        case .connecting:
-            return "连接中"
-        case .offline:
-            return "离线"
-        }
+        HostStatusBadge.text(
+            reachability: runtime.reachability,
+            latency: runtime.latencySeconds,
+            showLatency: model.settings.showLatency
+        )
     }
 
     private var statusHelp: String {

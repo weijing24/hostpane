@@ -72,6 +72,56 @@ enum HostpaneTheme {
     static let sidebarWidth: CGFloat = 232
 }
 
+private struct ReduceStatusMotionKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var reduceStatusMotion: Bool {
+        get { self[ReduceStatusMotionKey.self] }
+        set { self[ReduceStatusMotionKey.self] = newValue }
+    }
+}
+
+enum HostStatusBadge {
+    static func color(
+        reachability: DashboardReachability,
+        latency: Double?,
+        showLatency: Bool,
+        useColor: Bool
+    ) -> Color {
+        switch reachability {
+        case .online:
+            if showLatency, useColor, let latency {
+                return HostpaneTheme.latencyColor(latency)
+            }
+            return HostpaneTheme.online
+        case .connecting:
+            return HostpaneTheme.connecting
+        case .offline:
+            return HostpaneTheme.offline
+        }
+    }
+
+    static func text(
+        reachability: DashboardReachability,
+        latency: Double?,
+        showLatency: Bool
+    ) -> String {
+        switch reachability {
+        case .online:
+            if showLatency, let latency {
+                return formatLatency(latency)
+            }
+            return "在线"
+        case .connecting:
+            return "连接中"
+        case .offline:
+            return "离线"
+        }
+    }
+}
+
 extension AppearancePreference {
     var colorScheme: ColorScheme? {
         switch self {

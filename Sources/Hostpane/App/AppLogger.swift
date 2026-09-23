@@ -23,9 +23,36 @@ struct AppLogLine: Identifiable, Equatable, Sendable {
 
 enum AppLogStamp {
     static func format(_ date: Date) -> String {
+        stampFormatter.string(from: date)
+    }
+
+    static func parse(_ raw: String) -> AppLogLine? {
+        guard raw.first == "[" else { return nil }
+        let fields = bracketFields(raw, count: 3)
+        guard fields.count >= 3, let date = stampFormatter.date(from: fields[0]) else { return nil }
+        let level = AppLogLevel(rawValue: fields[1]) ?? .info
+        let message = fields.count >= 4 ? fields[3] : ""
+        return AppLogLine(timestamp: date, level: level, category: fields[2], message: message)
+    }
+
+    private static let stampFormatter: DateFormatter = {
         let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
-        return formatter.string(from: date)
+        return formatter
+    }()
+
+    private static func bracketFields(_ raw: String, count: Int) -> [String] {
+        var fields: [String] = []
+        var rest = Substring(raw)
+        for _ in 0..<count {
+            guard rest.first == "[", let end = rest.dropFirst().firstIndex(of: "]") else { break }
+            fields.append(String(rest[rest.index(after: rest.startIndex)..<end]))
+            rest = rest[rest.index(after: end)...]
+            if rest.first == " " { rest = rest.dropFirst() }
+        }
+        if !rest.isEmpty { fields.append(String(rest)) }
+        return fields
     }
 }
 
@@ -58,6 +85,12 @@ final class AppLogger {
             lines.removeFirst(lines.count - 500)
         }
         appendToFile(line.formattedLine)
+    }
+
+    func recentFileLines(limit: Int = 1000) -> [AppLogLine] {
+        guard let text = try? String(contentsOf: fileURL, encoding: .utf8) else { return [] }
+        let rows = text.split(separator: "\n", omittingEmptySubsequences: true)
+        return rows.suffix(limit).compactMap { AppLogStamp.parse(String($0)) }
     }
 
     func clear() {

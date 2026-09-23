@@ -18,6 +18,8 @@ struct SidebarView: View {
             }
 
             Section("工具箱") {
+                Label("代码片段", systemImage: "curlybraces")
+                    .tag(SidebarItem.snippets)
                 Label {
                     Text("Docker")
                 } icon: {

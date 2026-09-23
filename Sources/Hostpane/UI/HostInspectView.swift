@@ -3,6 +3,7 @@ import HostpaneCore
 
 struct HostInspectView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.colorScheme) private var colorScheme
     let host: HostRecord
     var showsChrome: Bool = true
     @State private var detail: InspectDetail?
@@ -18,39 +19,17 @@ struct HostInspectView: View {
 
     var body: some View {
         let runtime = model.runtime(for: host.id)
-        ScrollView {
+        DashboardScrollBackdrop(
+            light: model.settings.dashboardBackgroundLight,
+            dark: model.settings.dashboardBackgroundDark,
+            isDark: useDarkBackground,
+            inset: showsChrome ? 24 : 16
+        ) {
             VStack(alignment: .leading, spacing: 16) {
                 header(runtime)
-                cpuCard(runtime)
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .top, spacing: 16) {
-                        VStack(spacing: 16) {
-                            loadCard(runtime, expands: true)
-                            memoryCard(runtime, expands: true)
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        processCard(runtime, expands: true)
-                    }
-                    .fixedSize(horizontal: false, vertical: true)
-                    VStack(spacing: 16) {
-                        loadCard(runtime)
-                        memoryCard(runtime)
-                        processCard(runtime)
-                    }
-                }
-                VStack(spacing: 16) {
-                    networkCard(runtime)
-                    storageCard(runtime)
-                }
-                .frame(maxWidth: 680, alignment: .leading)
-                if let containers = runtime.metrics?.containers, !containers.isEmpty {
-                    dockerSection(containers)
-                }
+                statusBoard(runtime)
             }
-            .padding(showsChrome ? 24 : 16)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .background(HostpaneTheme.page)
         .navigationTitle(showsChrome ? record.displayName : "")
         .toolbar(showsChrome ? .automatic : .hidden)
         .toolbar {
@@ -148,6 +127,47 @@ struct HostInspectView: View {
         .onAppear { model.startMonitor(host) }
     }
 
+    private var useDarkBackground: Bool {
+        switch model.settings.appearance {
+        case .dark:
+            return true
+        case .light:
+            return false
+        case .system:
+            return colorScheme == .dark || model.isDarkAppearance
+        }
+    }
+
+    private func statusBoard(_ runtime: HostRuntime) -> some View {
+        let layout = model.settings.statusLayout.normalized()
+        let slots = StatusLayoutGrid.slots(for: layout)
+        return StatusBoardLayout(columns: layout.columns, slots: slots) {
+            ForEach(slots) { slot in
+                statusCard(slot.kind, runtime: runtime)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func statusCard(_ kind: StatusCardKind, runtime: HostRuntime) -> some View {
+        switch kind {
+        case .cpu:
+            cpuCard(runtime)
+        case .load:
+            loadCard(runtime, expands: true)
+        case .processes:
+            processCard(runtime, expands: true)
+        case .memory:
+            memoryCard(runtime, expands: true)
+        case .network:
+            networkCard(runtime)
+        case .storage:
+            storageCard(runtime)
+        case .docker:
+            dockerSection(runtime.metrics?.containers ?? [])
+        }
+    }
+
     @ViewBuilder
     private func header(_ runtime: HostRuntime) -> some View {
         HStack(alignment: .center, spacing: 16) {
@@ -201,7 +221,7 @@ struct HostInspectView: View {
     @ViewBuilder
     private func cpuCard(_ runtime: HostRuntime) -> some View {
         let metrics = runtime.metrics
-        InspectCard {
+        InspectCard(expandsVertically: true) {
             VStack(alignment: .leading, spacing: 14) {
                 HStack {
                     Label("CPU 利用率", systemImage: "cpu")
@@ -383,7 +403,7 @@ struct HostInspectView: View {
 
     @ViewBuilder
     private func networkCard(_ runtime: HostRuntime) -> some View {
-        InspectCard {
+        InspectCard(expandsVertically: true) {
             VStack(alignment: .leading, spacing: 12) {
                 Button {
                     detail = .network
@@ -412,7 +432,7 @@ struct HostInspectView: View {
 
     @ViewBuilder
     private func storageCard(_ runtime: HostRuntime) -> some View {
-        InspectCard {
+        InspectCard(expandsVertically: true) {
             VStack(alignment: .leading, spacing: 12) {
                 Button {
                     detail = .storage
@@ -453,9 +473,11 @@ struct HostInspectView: View {
                 Text("\(containers.count)")
                     .foregroundStyle(.secondary)
             }
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 12)], spacing: 12) {
-                ForEach(containers) { container in
-                    containerCard(container)
+            if !containers.isEmpty {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 12)], spacing: 12) {
+                    ForEach(containers) { container in
+                        containerCard(container)
+                    }
                 }
             }
         }
@@ -543,11 +565,18 @@ struct HostInspectView: View {
         .scaleEffect(active ? 1.04 : 1)
         .contentShape(Rectangle())
         .onHover { inside in
-            withAnimation(.spring(response: 0.28, dampingFraction: 0.72)) {
+            let update = {
                 if inside {
                     memoryHover = kind
                 } else if memoryHover == kind {
                     memoryHover = nil
+                }
+            }
+            if model.settings.reduceStatusMotion {
+                update()
+            } else {
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.72)) {
+                    update()
                 }
             }
         }
@@ -575,5 +604,79 @@ struct HostInspectView: View {
 
     private func volumeLabel(_ disk: DiskSample) -> String {
         "\(disk.mount)  \(formatInspectBytes(disk.totalBytes))"
+    }
+}
+
+private struct StatusBoardLayout: Layout {
+    var columns: Int
+    var slots: [StatusGridSlot]
+    var spacing: CGFloat = 16
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? 720
+        let rows = rowHeights(totalWidth: width, subviews: subviews)
+        let height = rows.reduce(0, +) + spacing * CGFloat(max(rows.count - 1, 0))
+        return CGSize(width: width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let rows = rowHeights(totalWidth: bounds.width, subviews: subviews)
+        let metrics = columnMetrics(totalWidth: bounds.width)
+        for index in subviews.indices where index < slots.count {
+            let frame = frame(for: slots[index], rows: rows, metrics: metrics, origin: bounds.origin)
+            subviews[index].place(
+                at: CGPoint(x: frame.minX, y: frame.minY),
+                anchor: .topLeading,
+                proposal: ProposedViewSize(width: frame.width, height: frame.height)
+            )
+        }
+    }
+
+    private func columnMetrics(totalWidth: CGFloat) -> (width: CGFloat, stride: CGFloat) {
+        let count = CGFloat(max(columns, 1))
+        let width = max((totalWidth - spacing * (count - 1)) / count, 1)
+        return (width, width + spacing)
+    }
+
+    private func rowHeights(totalWidth: CGFloat, subviews: Subviews) -> [CGFloat] {
+        let rowCount = slots.map { $0.row + $0.height }.max() ?? 0
+        guard rowCount > 0 else { return [] }
+        var rows = Array(repeating: CGFloat(0), count: rowCount)
+        let metrics = columnMetrics(totalWidth: totalWidth)
+        for index in subviews.indices where index < slots.count {
+            let slot = slots[index]
+            let cardWidth = metrics.width * CGFloat(slot.width) + spacing * CGFloat(max(slot.width - 1, 0))
+            let ideal = subviews[index].sizeThatFits(ProposedViewSize(width: cardWidth, height: nil)).height
+            let share = ideal / CGFloat(max(slot.height, 1))
+            let end = min(slot.row + slot.height, rows.count)
+            guard slot.row < end else { continue }
+            for row in slot.row..<end {
+                rows[row] = max(rows[row], share)
+            }
+        }
+        return rows
+    }
+
+    private func frame(
+        for slot: StatusGridSlot,
+        rows: [CGFloat],
+        metrics: (width: CGFloat, stride: CGFloat),
+        origin: CGPoint
+    ) -> CGRect {
+        let x = origin.x + metrics.stride * CGFloat(slot.column)
+        var y = origin.y
+        for row in 0..<min(slot.row, rows.count) {
+            y += rows[row] + spacing
+        }
+        let end = min(slot.row + slot.height, rows.count)
+        var height = CGFloat(0)
+        if slot.row < end {
+            for row in slot.row..<end {
+                height += rows[row]
+            }
+            height += spacing * CGFloat(end - slot.row - 1)
+        }
+        let width = metrics.width * CGFloat(slot.width) + spacing * CGFloat(max(slot.width - 1, 0))
+        return CGRect(x: x, y: y, width: width, height: max(height, 1))
     }
 }

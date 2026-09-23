@@ -18,6 +18,7 @@ struct ContentView: View {
                 .id(model.sidebarSelection)
         }
         .navigationSplitViewStyle(.balanced)
+        .environment(\.reduceStatusMotion, model.settings.reduceStatusMotion)
         .sheet(item: $model.editor) { _ in
             HostEditorView()
         }
@@ -51,6 +52,8 @@ struct ContentView: View {
             SSHKeysView()
         case .dockerHome:
             DockerRootView()
+        case .snippets:
+            SnippetsView()
         case .terminalHome:
             TerminalHomeView()
         case .session(let id):

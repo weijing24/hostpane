@@ -15,23 +15,25 @@ struct MachinesView: View {
         NavigationStack {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                HStack {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            filterChip("全部", selected: model.machineFilter == .all) {
-                                model.machineFilter = .all
-                            }
-                            filterChip("无标签", selected: model.machineFilter == .untagged) {
-                                model.machineFilter = .untagged
-                            }
-                            ForEach(model.knownTags, id: \.self) { tag in
-                                filterChip(tag, selected: model.machineFilter == .tag(tag)) {
-                                    model.machineFilter = .tag(tag)
+                if model.settings.showTagFilter {
+                    HStack {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                filterChip("全部", selected: model.machineFilter == .all) {
+                                    model.machineFilter = .all
+                                }
+                                filterChip("无标签", selected: model.machineFilter == .untagged) {
+                                    model.machineFilter = .untagged
+                                }
+                                ForEach(model.knownTags, id: \.self) { tag in
+                                    filterChip(tag, selected: model.machineFilter == .tag(tag)) {
+                                        model.machineFilter = .tag(tag)
+                                    }
                                 }
                             }
                         }
+                        Spacer(minLength: 0)
                     }
-                    Spacer(minLength: 0)
                 }
 
                 if model.hosts.isEmpty {
@@ -190,12 +192,14 @@ private struct MachineCard: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
-                HStack(spacing: 6) {
-                    if host.tags.isEmpty {
-                        tagCapsule("无标签")
-                    } else {
-                        ForEach(host.tags, id: \.self) { tag in
-                            tagCapsule(tag)
+                if model.settings.showTagsOnMachines {
+                    HStack(spacing: 6) {
+                        if host.tags.isEmpty {
+                            tagCapsule("无标签")
+                        } else {
+                            ForEach(host.tags, id: \.self) { tag in
+                                tagCapsule(tag)
+                            }
                         }
                     }
                 }

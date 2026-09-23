@@ -55,6 +55,7 @@ enum SidebarItem: Hashable, Identifiable {
     case session(UUID)
     case sftpHome
     case sftp(UUID)
+    case snippets
 
     var id: String {
         switch self {
@@ -66,6 +67,7 @@ enum SidebarItem: Hashable, Identifiable {
         case .session(let id): return "session-\(id.uuidString)"
         case .sftpHome: return "sftp-home"
         case .sftp(let id): return "sftp-\(id.uuidString)"
+        case .snippets: return "snippets"
         }
     }
 }
@@ -243,6 +245,7 @@ struct PendingConfigSync: Equatable {
 final class AppModel {
     var hosts: [HostRecord] = []
     var keys: [SSHKeyRecord] = []
+    var snippetLibrary = SnippetLibrary()
     var sidebarSelection: SidebarItem? = .dashboard
     var machineSearch: String = ""
     var machineFilter: MachineFilter = .all
@@ -265,6 +268,8 @@ final class AppModel {
     var configSyncPending: PendingConfigSync?
     var configSyncNotice: String?
     var configSyncError: String?
+    /// Bumped when the system appearance changes so dashboard backgrounds refresh.
+    var appearanceRevision = 0
     let logger = AppLogger()
     private(set) var runtimes: [UUID: HostRuntime] = [:]
 
@@ -273,19 +278,23 @@ final class AppModel {
     private let secrets: SecretStore
     private let importer: SSHConfigImporter
     private let settingsStore: SettingsStore
+    private let snippetStore: SnippetStore
+    private var appearanceObserver: NSObjectProtocol?
 
     init(
         store: HostStore = HostStore(),
         keyStore: KeyStore = KeyStore(),
         secrets: SecretStore = SecretStore(),
         importer: SSHConfigImporter = SSHConfigImporter(),
-        settingsStore: SettingsStore = SettingsStore()
+        settingsStore: SettingsStore = SettingsStore(),
+        snippetStore: SnippetStore = SnippetStore()
     ) {
         self.store = store
         self.keyStore = keyStore
         self.secrets = secrets
         self.importer = importer
         self.settingsStore = settingsStore
+        self.snippetStore = snippetStore
         if let loaded = try? settingsStore.load() {
             settings = loaded
         }
@@ -301,9 +310,21 @@ final class AppModel {
                 .compactMap { $0 }
                 .joined(separator: "\n")
         }
+        if let loaded = try? snippetStore.load() {
+            snippetLibrary = loaded
+        }
         logger.enabled = settings.appLoggingEnabled
         logger.info("app", "Hostpane started hosts=\(hosts.count) logging=\(logger.enabled)")
         refreshConflictNotice()
+        appearanceObserver = DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name("AppleInterfaceThemeChangedNotification"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.appearanceRevision += 1
+            }
+        }
     }
 
     var selectedHost: HostRecord? {
@@ -532,6 +553,94 @@ final class AppModel {
         }
     }
 
+    func saveSnippets() {
+        do {
+            try snippetStore.save(snippetLibrary)
+        } catch {
+            logger.error("app", "save snippets failed: \(error.localizedDescription)")
+        }
+    }
+
+    func addSnippetPackage(name: String, note: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        snippetLibrary.packages.append(SnippetPackage(name: trimmed, note: note))
+        saveSnippets()
+    }
+
+    func addCodeSnippet(name: String, body: String, note: String, packageID: UUID?) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        snippetLibrary.snippets.append(
+            CodeSnippet(packageID: packageID, name: trimmed, body: body, note: note)
+        )
+        saveSnippets()
+    }
+
+    func updateCodeSnippet(_ snippet: CodeSnippet) {
+        guard let index = snippetLibrary.snippets.firstIndex(where: { $0.id == snippet.id }) else { return }
+        snippetLibrary.snippets[index] = snippet
+        saveSnippets()
+    }
+
+    func deleteSnippetPackage(_ id: UUID) {
+        snippetLibrary.packages.removeAll { $0.id == id }
+        for index in snippetLibrary.snippets.indices where snippetLibrary.snippets[index].packageID == id {
+            snippetLibrary.snippets[index].packageID = nil
+        }
+        saveSnippets()
+    }
+
+    func deleteCodeSnippet(_ id: UUID) {
+        snippetLibrary.snippets.removeAll { $0.id == id }
+        snippetLibrary.runs.removeAll { $0.snippetID == id }
+        saveSnippets()
+    }
+
+    func snippetRuns(_ snippetID: UUID) -> [SnippetRun] {
+        snippetLibrary.runs
+            .filter { $0.snippetID == snippetID }
+            .sorted { $0.startedAt > $1.startedAt }
+    }
+
+    func executeSnippet(_ snippet: CodeSnippet, hosts: [HostRecord]) async -> SnippetRun {
+        var chunks: [String] = []
+        var succeeded = 0
+        var failed = 0
+        for host in hosts {
+            let engine = SSHEngine()
+            let marker = "HOSTPANE_\(UUID().uuidString.replacingOccurrences(of: "-", with: ""))"
+            let command = "bash -s <<'\(marker)'\n\(snippet.body)\n\(marker)"
+            do {
+                try await engine.connect(host: host, secrets: secrets, settings: settings, keepAlive: .terminal)
+                let result = try await engine.execute(command)
+                let text = String(decoding: result.standardOutput, as: UTF8.self)
+                let errorText = String(decoding: result.standardError, as: UTF8.self)
+                let exit = result.exitStatus ?? 1
+                if exit == 0 {
+                    succeeded += 1
+                } else {
+                    failed += 1
+                }
+                chunks.append("=== \(host.displayName) exit=\(exit) ===\n\(text)\(errorText)")
+                logger.info("app", "snippet \(snippet.name) on \(host.displayName) exit=\(exit)")
+            } catch {
+                failed += 1
+                chunks.append("=== \(host.displayName) ===\n\(error.localizedDescription)")
+                logger.error("app", "snippet \(snippet.name) on \(host.displayName) failed: \(error.localizedDescription)")
+            }
+            await engine.close()
+        }
+        let run = SnippetRun(
+            snippetID: snippet.id,
+            summary: "成功 \(succeeded)，失败 \(failed)",
+            output: chunks.joined(separator: "\n\n")
+        )
+        snippetLibrary.runs.insert(run, at: 0)
+        saveSnippets()
+        return run
+    }
+
     func persistSettings() {
         var next = settings
         next.clamp()
@@ -546,6 +655,7 @@ final class AppModel {
     }
 
     var isDarkAppearance: Bool {
+        _ = appearanceRevision
         switch settings.appearance {
         case .dark:
             return true
@@ -1848,11 +1958,18 @@ final class AppModel {
 
     private func sampleLoop(runtime: HostRuntime, engine: SSHEngine) async {
         var isFirst = true
+        var latencyDue = ContinuousClock.now
         while !Task.isCancelled {
+            let refresh = settings.statusRefreshSeconds
+            let latencyEvery = settings.latencyRefreshSeconds
+            let sampleLatency = settings.showLatency
             do {
-                let pingStarted = ContinuousClock.now
-                _ = try await engine.execute(LinuxMetricsProbe.latencyCommand)
-                runtime.latency.push(durationToSeconds(ContinuousClock.now - pingStarted))
+                if sampleLatency, ContinuousClock.now >= latencyDue {
+                    let pingStarted = ContinuousClock.now
+                    _ = try await engine.execute(LinuxMetricsProbe.latencyCommand)
+                    runtime.latency.push(durationToSeconds(ContinuousClock.now - pingStarted))
+                    latencyDue = ContinuousClock.now.advanced(by: .seconds(latencyEvery))
+                }
 
                 let result = try await engine.execute(LinuxMetricsProbe.remoteCommand)
                 var metrics = try runtime.parser.consume(String(decoding: result.standardOutput, as: UTF8.self))
@@ -1867,7 +1984,7 @@ final class AppModel {
             } catch {
                 runtime.lastError = describeSSHError(error)
             }
-            let delay: Duration = isFirst ? .milliseconds(400) : .seconds(2)
+            let delay: Duration = isFirst ? .milliseconds(400) : .seconds(refresh)
             isFirst = false
             try? await Task.sleep(for: delay)
         }

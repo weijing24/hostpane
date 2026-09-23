@@ -69,7 +69,8 @@ public enum ConfigSync {
         "hosts.json",
         "settings.json",
         "keys.json",
-        "known-hosts.json"
+        "known-hosts.json",
+        "snippets.json"
     ]
 
     public static var destination: ConfigSyncDestination {

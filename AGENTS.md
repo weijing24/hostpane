@@ -37,6 +37,15 @@ GitHub Actions (`.github/workflows/release-dmg.yml`) selects Xcode on
 `--build-system native` is deprecated; keep it until SwiftUIMacros is in
 CLT or the default `swiftbuild` backend can compile SwiftUI without Xcode.
 
+## Install after compile
+
+A local Hostpane compile is finished only after `/Applications/Hostpane.app`
+is replaced. Use `./scripts/package-app.sh` — it release-builds, then
+installs and ad-hoc signs there. Do not leave the new binary only in
+`.build/` or `/tmp`.
+
+`HostpaneCheck` is not installed.
+
 ## Do not
 
 - Recreate an Xcode project.

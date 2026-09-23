@@ -228,35 +228,50 @@ private struct TerminalInspectorPane: View {
 }
 
 private struct TerminalSnippetsPane: View {
+    @Environment(AppModel.self) private var model
     @State private var query = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        let snippets = filtered
+        VStack(alignment: .leading, spacing: 12) {
             TextField("搜索代码片段或软件包", text: $query)
                 .textFieldStyle(.roundedBorder)
-            Text("包")
-                .font(.headline)
-            ContentUnavailableView {
-                Label("无可用代码片段包", systemImage: "shippingbox")
+            if snippets.isEmpty {
+                ContentUnavailableView {
+                    Label("无可用代码片段", systemImage: "curlybraces")
+                } description: {
+                    Text("在工具箱的代码片段里创建。点击一条即可复制。")
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List(snippets) { snippet in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(snippet.name)
+                        Text(snippet.body)
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture { copy(snippet.body) }
+                }
             }
-            .frame(maxWidth: .infinity, minHeight: 160)
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color(nsColor: .windowBackgroundColor))
-            )
-            Text("代码片段")
-                .font(.headline)
-            ContentUnavailableView {
-                Label("无可用代码片段", systemImage: "curlybraces")
-            }
-            .frame(maxWidth: .infinity, minHeight: 160)
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color(nsColor: .windowBackgroundColor))
-            )
-            Spacer(minLength: 0)
         }
         .padding(16)
+    }
+
+    private var filtered: [CodeSnippet] {
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        return model.snippetLibrary.snippets.filter { snippet in
+            needle.isEmpty
+                || snippet.name.localizedStandardContains(needle)
+                || snippet.body.localizedStandardContains(needle)
+        }
+    }
+
+    private func copy(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
     }
 }
 

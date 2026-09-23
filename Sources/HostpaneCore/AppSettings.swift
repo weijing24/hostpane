@@ -117,6 +117,18 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var terminalInactiveCursor: TerminalInactiveCursor
     public var terminalScrollbar: TerminalScrollbar
     public var appLoggingEnabled: Bool
+    public var dashboardBackgroundLight: DashboardBackground
+    public var dashboardBackgroundDark: DashboardBackground
+    public var statusRefreshSeconds: Int
+    public var showTagFilter: Bool
+    public var showTagsOnMachines: Bool
+    public var showLatency: Bool
+    public var latencyUsesColor: Bool
+    public var latencyRefreshSeconds: Int
+    public var reduceStatusMotion: Bool
+    public var statusLayout: StatusDetailLayout
+
+    public static let statusRefreshChoices = [2, 3, 5, 10, 15, 30, 60]
 
     public init(
         connectionTimeoutSeconds: Int = 15,
@@ -138,7 +150,17 @@ public struct AppSettings: Codable, Equatable, Sendable {
         terminalCursorBlink: Bool = true,
         terminalInactiveCursor: TerminalInactiveCursor = .fade,
         terminalScrollbar: TerminalScrollbar = .overlay,
-        appLoggingEnabled: Bool = true
+        appLoggingEnabled: Bool = true,
+        dashboardBackgroundLight: DashboardBackground = .plain,
+        dashboardBackgroundDark: DashboardBackground = .plain,
+        statusRefreshSeconds: Int = 5,
+        showTagFilter: Bool = true,
+        showTagsOnMachines: Bool = true,
+        showLatency: Bool = true,
+        latencyUsesColor: Bool = true,
+        latencyRefreshSeconds: Int = 30,
+        reduceStatusMotion: Bool = false,
+        statusLayout: StatusDetailLayout = .default
     ) {
         self.connectionTimeoutSeconds = connectionTimeoutSeconds
         self.alwaysTrustHostKeys = alwaysTrustHostKeys
@@ -160,6 +182,16 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.terminalInactiveCursor = terminalInactiveCursor
         self.terminalScrollbar = terminalScrollbar
         self.appLoggingEnabled = appLoggingEnabled
+        self.dashboardBackgroundLight = dashboardBackgroundLight
+        self.dashboardBackgroundDark = dashboardBackgroundDark
+        self.statusRefreshSeconds = statusRefreshSeconds
+        self.showTagFilter = showTagFilter
+        self.showTagsOnMachines = showTagsOnMachines
+        self.showLatency = showLatency
+        self.latencyUsesColor = latencyUsesColor
+        self.latencyRefreshSeconds = latencyRefreshSeconds
+        self.reduceStatusMotion = reduceStatusMotion
+        self.statusLayout = statusLayout
         clamp()
     }
 
@@ -185,6 +217,16 @@ public struct AppSettings: Codable, Equatable, Sendable {
         terminalInactiveCursor = try container.decodeIfPresent(TerminalInactiveCursor.self, forKey: .terminalInactiveCursor) ?? .fade
         terminalScrollbar = try container.decodeIfPresent(TerminalScrollbar.self, forKey: .terminalScrollbar) ?? .overlay
         appLoggingEnabled = try container.decodeIfPresent(Bool.self, forKey: .appLoggingEnabled) ?? true
+        dashboardBackgroundLight = try container.decodeIfPresent(DashboardBackground.self, forKey: .dashboardBackgroundLight) ?? .plain
+        dashboardBackgroundDark = try container.decodeIfPresent(DashboardBackground.self, forKey: .dashboardBackgroundDark) ?? .plain
+        statusRefreshSeconds = try container.decodeIfPresent(Int.self, forKey: .statusRefreshSeconds) ?? 5
+        showTagFilter = try container.decodeIfPresent(Bool.self, forKey: .showTagFilter) ?? true
+        showTagsOnMachines = try container.decodeIfPresent(Bool.self, forKey: .showTagsOnMachines) ?? true
+        showLatency = try container.decodeIfPresent(Bool.self, forKey: .showLatency) ?? true
+        latencyUsesColor = try container.decodeIfPresent(Bool.self, forKey: .latencyUsesColor) ?? true
+        latencyRefreshSeconds = try container.decodeIfPresent(Int.self, forKey: .latencyRefreshSeconds) ?? 30
+        reduceStatusMotion = try container.decodeIfPresent(Bool.self, forKey: .reduceStatusMotion) ?? false
+        statusLayout = try container.decodeIfPresent(StatusDetailLayout.self, forKey: .statusLayout) ?? .default
         clamp()
     }
 
@@ -194,6 +236,9 @@ public struct AppSettings: Codable, Equatable, Sendable {
         sftpKeepAliveSeconds = Self.clampedSeconds(sftpKeepAliveSeconds)
         terminalFontSize = min(max(terminalFontSize, 9), 22)
         terminalLineSpacing = min(max(terminalLineSpacing, 1.0), 1.6)
+        statusRefreshSeconds = Self.clampedStatusRefresh(statusRefreshSeconds)
+        latencyRefreshSeconds = Self.clampedSeconds(latencyRefreshSeconds)
+        statusLayout = statusLayout.normalized()
     }
 
     public var clamped: AppSettings {
@@ -204,6 +249,10 @@ public struct AppSettings: Codable, Equatable, Sendable {
 
     public static func clampedSeconds(_ value: Int) -> Int {
         min(max(value, 5), 120)
+    }
+
+    public static func clampedStatusRefresh(_ value: Int) -> Int {
+        statusRefreshChoices.min { abs($0 - value) < abs($1 - value) } ?? 5
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -227,6 +276,16 @@ public struct AppSettings: Codable, Equatable, Sendable {
         case terminalInactiveCursor
         case terminalScrollbar
         case appLoggingEnabled
+        case dashboardBackgroundLight
+        case dashboardBackgroundDark
+        case statusRefreshSeconds
+        case showTagFilter
+        case showTagsOnMachines
+        case showLatency
+        case latencyUsesColor
+        case latencyRefreshSeconds
+        case reduceStatusMotion
+        case statusLayout
     }
 }
 

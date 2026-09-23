@@ -6,14 +6,21 @@ import Foundation
 // Assets.car / Icon Composer), and macOS Tahoe leaves that unmasked — a
 // full-bleed square therefore shows as a square in the Dock. The ring
 // follows the squircle; do not fill the corner pixels.
+//
+// Asset-catalog icons are masked to an 824×824 squircle: 100px of margin
+// on a 1024 canvas. Bake that margin into the icns so the Dock tile
+// matches neighboring apps. The README image stays full-bleed.
 
 let canvas = CGFloat(1024)
 let bounds = NSRect(x: 0, y: 0, width: canvas, height: canvas)
-let ringWidth = canvas * 0.078
+let systemMargin = CGFloat(100)
 let squircleN = CGFloat(5)
 
 let args = Array(CommandLine.arguments.dropFirst())
 let readme = args.contains("--readme")
+let margin = readme ? CGFloat(0) : systemMargin
+let artboard = bounds.insetBy(dx: margin, dy: margin)
+let ringWidth = artboard.width * 0.078
 let out = args.first(where: { $0 != "--readme" })
     ?? (readme
         ? "Sources/Hostpane/Resources/AppIcon-readme.png"
@@ -49,10 +56,10 @@ let blue = NSColor(srgbRed: 0.20, green: 0.52, blue: 1.00, alpha: 1)
 let cyan = NSColor(srgbRed: 0.22, green: 0.68, blue: 1.00, alpha: 1)
 let gradient = NSGradient(colors: [pink, violet, blue, cyan])!
 
-let outer = squirclePath(in: bounds, n: squircleN)
+let outer = squirclePath(in: artboard, n: squircleN)
 gradient.draw(in: outer, angle: -40)
 
-let plateRect = bounds.insetBy(dx: ringWidth, dy: ringWidth)
+let plateRect = artboard.insetBy(dx: ringWidth, dy: ringWidth)
 let platePath = squirclePath(in: plateRect, n: squircleN)
 
 NSGraphicsContext.current?.saveGraphicsState()
@@ -76,7 +83,10 @@ let rocketBox = NSRect(x: 0, y: 0, width: 100, height: 160)
 let targetHeight = plateRect.width * 0.50
 let scale = targetHeight / rocketBox.height
 var transform = AffineTransform()
-transform.translate(x: canvas * 0.445, y: canvas * 0.512)
+transform.translate(
+    x: artboard.midX + artboard.width * (0.445 - 0.5),
+    y: artboard.midY + artboard.height * (0.512 - 0.5)
+)
 transform.rotate(byDegrees: -40)
 transform.scale(scale)
 transform.translate(x: -rocketBox.midX, y: -rocketBox.midY)

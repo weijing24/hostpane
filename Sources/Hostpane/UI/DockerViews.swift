@@ -135,27 +135,20 @@ private struct DockerHostCard: View {
     }
 
     private var statusColor: Color {
-        switch runtime.reachability {
-        case .online:
-            if let latency = runtime.latencySeconds {
-                return HostpaneTheme.latencyColor(latency)
-            }
-            return HostpaneTheme.loadLow
-        case .connecting: return HostpaneTheme.connecting
-        case .offline: return HostpaneTheme.offline
-        }
+        HostStatusBadge.color(
+            reachability: runtime.reachability,
+            latency: runtime.latencySeconds,
+            showLatency: model.settings.showLatency,
+            useColor: model.settings.latencyUsesColor
+        )
     }
 
     private var statusText: String {
-        switch runtime.reachability {
-        case .online:
-            if let latency = runtime.latencySeconds {
-                return formatLatency(latency)
-            }
-            return "在线"
-        case .connecting: return "连接中"
-        case .offline: return "离线"
-        }
+        HostStatusBadge.text(
+            reachability: runtime.reachability,
+            latency: runtime.latencySeconds,
+            showLatency: model.settings.showLatency
+        )
     }
 
     private var coresText: String {

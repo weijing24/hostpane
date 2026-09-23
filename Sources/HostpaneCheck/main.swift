@@ -490,6 +490,69 @@ func settingsCodableChecks() throws {
     try expect(ordered.dashboardHostIDs == [second, first], "dashboard order roundtrip")
 }
 
+func dashboardPreferenceChecks() throws {
+    let empty = try JSONDecoder().decode(AppSettings.self, from: Data("{}".utf8))
+    try expect(empty.dashboardBackgroundLight == .plain, "background light default")
+    try expect(empty.dashboardBackgroundDark == .plain, "background dark default")
+    try expect(empty.statusRefreshSeconds == 5, "status refresh default")
+    try expect(empty.showTagFilter, "tag filter default")
+    try expect(empty.showTagsOnMachines, "machine tags default")
+    try expect(empty.showLatency, "latency default")
+    try expect(empty.latencyUsesColor, "latency color default")
+    try expect(empty.latencyRefreshSeconds == 30, "latency interval default")
+    try expect(empty.reduceStatusMotion == false, "motion default")
+    try expect(empty.statusLayout == .default, "layout default")
+
+    var settings = AppSettings(statusRefreshSeconds: 1, latencyRefreshSeconds: 4)
+    try expect(settings.statusRefreshSeconds == 2, "status refresh clamp")
+    try expect(settings.latencyRefreshSeconds == 5, "latency interval clamp")
+    settings = AppSettings(statusRefreshSeconds: 8)
+    try expect(settings.statusRefreshSeconds == 10, "status refresh nearest")
+
+    let slots = StatusLayoutGrid.slots(for: .default)
+    let cpu = slots.first { $0.kind == .cpu }
+    try expect(cpu?.row == 0 && cpu?.column == 0 && cpu?.width == 2, "cpu slot")
+    let load = slots.first { $0.kind == .load }
+    try expect(load?.row == 1 && load?.column == 0, "load slot")
+    let processes = slots.first { $0.kind == .processes }
+    try expect(processes?.row == 1 && processes?.column == 1 && processes?.height == 2, "process slot")
+    let memory = slots.first { $0.kind == .memory }
+    try expect(memory?.row == 2 && memory?.column == 0, "memory slot")
+    let network = slots.first { $0.kind == .network }
+    try expect(network?.row == 3 && network?.width == 2, "network slot")
+
+    var layout = StatusDetailLayout.default
+    layout.remove(.docker)
+    layout.columns = 9
+    let normalized = layout.normalized()
+    try expect(normalized.columns == 4, "column clamp")
+    try expect(normalized.missingKinds == [.docker], "missing docker")
+    settings.dashboardBackgroundLight = .ocean
+    settings.dashboardBackgroundDark = .neon
+    settings.showTagFilter = false
+    settings.showTagsOnMachines = false
+    settings.showLatency = false
+    settings.latencyUsesColor = false
+    settings.reduceStatusMotion = true
+    settings.statusLayout = normalized
+
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = SettingsStore(fileURL: directory.appendingPathComponent("settings.json"))
+    try store.save(settings)
+    let loaded = try store.load()
+    try expect(loaded.dashboardBackgroundLight == .ocean, "background light roundtrip")
+    try expect(loaded.dashboardBackgroundDark == .neon, "background dark roundtrip")
+    try expect(loaded.showTagFilter == false, "tag filter roundtrip")
+    try expect(loaded.showTagsOnMachines == false, "machine tags roundtrip")
+    try expect(loaded.showLatency == false, "latency roundtrip")
+    try expect(loaded.latencyUsesColor == false, "latency color roundtrip")
+    try expect(loaded.reduceStatusMotion, "motion roundtrip")
+    try expect(loaded.statusLayout.columns == 4, "layout columns roundtrip")
+    try expect(!loaded.statusLayout.cards.contains { $0.kind == .docker }, "layout cards roundtrip")
+}
+
 func configSyncChecks() throws {
     try expect(ConfigSync.syncedFileNames.contains("hosts.json"), "hosts file")
     try expect(ConfigSync.syncedFileNames.contains("settings.json"), "settings file")
@@ -804,6 +867,7 @@ do {
     try sshConfigUsernameFillChecks()
     try hostRecordCodableChecks()
     try settingsCodableChecks()
+    try dashboardPreferenceChecks()
     try dashboardOrderChecks()
     try sftpPathChecks()
     try metricBandChecks()

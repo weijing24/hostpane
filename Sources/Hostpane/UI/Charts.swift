@@ -7,6 +7,7 @@ struct RingMeter: View {
     var color: Color
     var size: CGFloat = 72
     var titleOnTop: Bool = false
+    @Environment(\.reduceStatusMotion) private var reduceStatusMotion
 
     var body: some View {
         let ring = ZStack {
@@ -20,6 +21,7 @@ struct RingMeter: View {
                 .font(size < 60 ? .caption2.monospacedDigit().weight(.semibold) : .caption.monospacedDigit().weight(.semibold))
         }
         .frame(width: size, height: size)
+        .animation(reduceStatusMotion ? nil : .easeInOut(duration: 0.35), value: ratio)
         let label = Text(title)
             .font(.caption2)
             .foregroundStyle(.secondary)
@@ -348,6 +350,7 @@ struct MemoryDonut: View {
     var metrics: HostMetrics
     var size: CGFloat = 148
     @Binding var hovered: MemorySliceKind?
+    @Environment(\.reduceStatusMotion) private var reduceStatusMotion
 
     var body: some View {
         let slices = Self.slices(from: metrics)
@@ -371,18 +374,25 @@ struct MemoryDonut: View {
                     )
                 )
                 .onHover { inside in
-                    withAnimation(.spring(response: 0.28, dampingFraction: 0.72)) {
+                    let update = {
                         if inside {
                             hovered = slice.kind
                         } else if hovered == slice.kind {
                             hovered = nil
                         }
                     }
+                    if reduceStatusMotion {
+                        update()
+                    } else {
+                        withAnimation(.spring(response: 0.28, dampingFraction: 0.72)) {
+                            update()
+                        }
+                    }
                 }
                 .zIndex(expanded ? 1 : 0)
             }
             centerLabel
-                .animation(.spring(response: 0.28, dampingFraction: 0.82), value: hovered)
+                .animation(reduceStatusMotion ? nil : .spring(response: 0.28, dampingFraction: 0.82), value: hovered)
         }
         .frame(width: size, height: size)
         .padding(6)
