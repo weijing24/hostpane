@@ -857,8 +857,57 @@ func dockerParserChecks() throws {
     try expect(events.events[1].action.contains("nc -z"), "exec_start command")
 }
 
+func appUpdateChecks() throws {
+    try expect(AppVersion(parsing: "v1.0.4") == AppVersion(major: 1, minor: 0, patch: 4), "v prefix")
+    try expect(AppVersion(parsing: "1.0") == AppVersion(major: 1, minor: 0, patch: 0), "minor only")
+    try expect(AppVersion(parsing: "1.0.3-beta") == nil, "prerelease rejected")
+    try expect(AppVersion(parsing: "01.2.3") == nil, "leading zero rejected")
+    let older = AppVersion(major: 1, minor: 0, patch: 9)
+    let newer = AppVersion(major: 1, minor: 0, patch: 10)
+    try expect(older < newer, "numeric patch order")
+
+    let payload = """
+    {"tag_name":"v1.2.0","body":"## What's Changed\\n- Add updates\\n","assets":[
+      {"name":"notes.txt","browser_download_url":"https://example.invalid/notes.txt"},
+      {"name":"Hostpane-1.1.0-arm64.dmg","browser_download_url":"https://github.com/weijing24/hostpane/releases/download/v1.1.0/Hostpane-1.1.0-arm64.dmg"},
+      {"name":"Hostpane-1.2.0-arm64.dmg","browser_download_url":"https://github.com/weijing24/hostpane/releases/download/v1.2.0/Hostpane-1.2.0-arm64.dmg"}
+    ]}
+    """
+    let release = try AppUpdateFeed.release(from: Data(payload.utf8))
+    try expect(release.version == AppVersion(major: 1, minor: 2, patch: 0), "parsed version")
+    try expect(release.fileName == "Hostpane-1.2.0-arm64.dmg", "exact arm64 asset")
+    try expect(release.notes.contains("Add updates"), "notes")
+    let current = AppVersion(major: 1, minor: 0, patch: 4)
+    if case .available(let available) = AppUpdateFeed.offer(current: current, release: release) {
+        try expect(available.version == release.version, "offer newer")
+    } else {
+        try expect(false, "expected an update offer")
+    }
+    if case .upToDate(let installed, let latest) = AppUpdateFeed.offer(current: release.version, release: release) {
+        try expect(installed == latest, "same version is current")
+    } else {
+        try expect(false, "expected up to date")
+    }
+    let ahead = AppVersion(major: 1, minor: 3, patch: 0)
+    if case .upToDate(let installed, let latest) = AppUpdateFeed.offer(current: ahead, release: release) {
+        try expect(installed == ahead && latest == release.version, "local build ahead of release")
+    } else {
+        try expect(false, "expected ahead to stay put")
+    }
+
+    let missing = #"{"tag_name":"v1.0.0","assets":[{"name":"Hostpane-1.0.0.zip","browser_download_url":"https://example.invalid/a.zip"}]}"#
+    do {
+        _ = try AppUpdateFeed.release(from: Data(missing.utf8))
+        try expect(false, "zip-only release should fail")
+    } catch AppUpdateParseError.noAppleSiliconDiskImage {
+    } catch {
+        try expect(false, "unexpected missing-dmg error \(error)")
+    }
+}
+
 do {
     try metricsChecks()
+    try appUpdateChecks()
     try latencyWindowChecks()
     try inspectMetricChecks()
     try inspectDetailChecks()

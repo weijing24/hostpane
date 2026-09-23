@@ -4,6 +4,7 @@ import SwiftUI
 @main
 struct HostpaneApp: App {
     @State private var model = AppModel()
+    @State private var updater = AppUpdater()
 
     init() {
         if let url = Bundle.main.url(forResource: "Hostpane", withExtension: "icns"),
@@ -30,6 +31,11 @@ struct HostpaneApp: App {
                     model.beginAddHost()
                 }
                 .keyboardShortcut("n", modifiers: [.command])
+            }
+            CommandGroup(after: .appInfo) {
+                Button("检查更新…") {
+                    updater.checkForUpdates(logger: model.logger)
+                }
             }
             CommandGroup(after: .help) {
                 Button("打开应用日志") {
