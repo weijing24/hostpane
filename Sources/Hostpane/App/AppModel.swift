@@ -92,6 +92,10 @@ final class HostRuntime {
     var metricsTask: Task<Void, Never>?
     var monitorTask: Task<Void, Never>?
     var shellTask: Task<Void, Never>?
+    /// Set for the whole `openShell` call. `shellTask` is assigned only after
+    /// the channel exists, so a second start must not treat that gap as idle.
+    var shellOpening = false
+    var shellGeneration = 0
     var sftpTask: Task<Void, Never>?
     var sftpPhase: ConnectionPhase = .idle
     var sftpClient: SFTPClient?
@@ -159,6 +163,8 @@ final class HostRuntime {
         metricsTask = nil
         monitorTask = nil
         shellTask = nil
+        shellOpening = false
+        shellGeneration += 1
         terminal.unbind()
         progress.reset()
         let engine = self.engine
@@ -1894,7 +1900,7 @@ final class AppModel {
                 guard !Task.isCancelled, runtime.phase == .connected else { return }
                 runtime.progress.cardVisible = false
                 try await Task.sleep(for: .milliseconds(400))
-                if runtime.shellTask == nil {
+                if runtime.shellTask == nil, !runtime.shellOpening {
                     await self.startShell(host: host, runtime: runtime, columns: 120, rows: 36)
                 }
                 if sampleMetrics {
@@ -1934,17 +1940,32 @@ final class AppModel {
         columns: UInt32,
         rows: UInt32
     ) async {
-        guard runtime.shellTask == nil, runtime.phase == .connected else { return }
+        guard runtime.shellTask == nil, !runtime.shellOpening, runtime.phase == .connected else { return }
+        runtime.shellOpening = true
+        let generation = runtime.shellGeneration
+        defer {
+            if runtime.shellGeneration == generation, runtime.shellTask == nil {
+                runtime.shellOpening = false
+            }
+        }
         do {
             let session = try await runtime.engine.openShell(columns: columns, rows: rows)
+            guard runtime.shellGeneration == generation, runtime.phase == .connected else {
+                try? await session.close()
+                return
+            }
             runtime.terminal.bind(session: session, columns: columns, rows: rows)
             runtime.progress.mark(.shell, .done)
             runtime.shellTask = Task {
                 await runtime.terminal.runEventLoop()
             }
             runtime.terminal.requestFocus()
+        } catch is CancellationError {
+            return
         } catch {
-            runtime.lastError = "Terminal: \(describeSSHError(error))"
+            if runtime.shellGeneration == generation {
+                runtime.lastError = "Terminal: \(describeSSHError(error))"
+            }
         }
     }
 

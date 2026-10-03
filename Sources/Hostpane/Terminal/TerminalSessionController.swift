@@ -14,6 +14,9 @@ final class TerminalSessionController: NSObject, @preconcurrency TerminalViewDel
     private var lastSentColumns: UInt32 = 0
     private var lastSentRows: UInt32 = 0
     private var resizeTask: Task<Void, Never>?
+    private var pendingInput: [[UInt8]] = []
+    private var inputPump: Task<Void, Never>?
+    private var inputGeneration = 0
     private var didEnd = false
     private var didBecomeReady = false
 
@@ -148,6 +151,7 @@ final class TerminalSessionController: NSObject, @preconcurrency TerminalViewDel
 
     func unbind() {
         resizeTask?.cancel()
+        cancelInput()
         onReadyToOpenShell = nil
         onSessionEnded = nil
         session = nil
@@ -198,6 +202,8 @@ final class TerminalSessionController: NSObject, @preconcurrency TerminalViewDel
         if !didBecomeReady, newCols >= 20, newRows >= 5 {
             didBecomeReady = true
             onReadyToOpenShell?(columns, rows)
+            // The shell may already be open at the fallback size.
+            scheduleResize()
             return
         }
         scheduleResize()
@@ -210,11 +216,13 @@ final class TerminalSessionController: NSObject, @preconcurrency TerminalViewDel
     func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
 
     func send(source: TerminalView, data: ArraySlice<UInt8>) {
-        guard let session, !didEnd else { return }
+        guard session != nil, !didEnd else { return }
         let bytes = Array(data)
-        Task {
-            try? await session.write(bytes)
-        }
+        guard !bytes.isEmpty else { return }
+        // Traversio rejects a second write on the same channel and drops those
+        // bytes. Keystrokes have to stay ordered behind the one in flight.
+        pendingInput.append(bytes)
+        startInputPumpIfNeeded()
     }
 
     func scrolled(source: TerminalView, position: Double) {}
@@ -271,8 +279,48 @@ final class TerminalSessionController: NSObject, @preconcurrency TerminalViewDel
     private func finishSession() {
         guard !didEnd else { return }
         didEnd = true
+        cancelInput()
         session = nil
         onSessionEnded?()
+    }
+
+    private func startInputPumpIfNeeded() {
+        guard inputPump == nil else { return }
+        let generation = inputGeneration
+        inputPump = Task { [weak self] in
+            await self?.drainInput(generation: generation)
+        }
+    }
+
+    private func drainInput(generation: Int) async {
+        defer {
+            if inputGeneration == generation {
+                inputPump = nil
+                if !pendingInput.isEmpty, session != nil, !didEnd {
+                    startInputPumpIfNeeded()
+                }
+            }
+        }
+        while !Task.isCancelled {
+            guard inputGeneration == generation, let session, !didEnd, !pendingInput.isEmpty else { return }
+            let bytes = pendingInput.removeFirst()
+            do {
+                try await session.write(bytes)
+            } catch is CancellationError {
+                return
+            } catch {
+                if inputGeneration != generation || didEnd || self.session == nil {
+                    return
+                }
+            }
+        }
+    }
+
+    private func cancelInput() {
+        inputGeneration += 1
+        pendingInput.removeAll(keepingCapacity: true)
+        inputPump?.cancel()
+        inputPump = nil
     }
 
     private func feed(_ bytes: [UInt8]) {
