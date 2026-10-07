@@ -21,7 +21,7 @@ struct AppLogView: View {
             .padding(24)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .background(HostpaneTheme.page)
+        .background(Color(nsColor: .windowBackgroundColor))
         .background {
             Color.clear.task(id: rows.map(\.id)) {
                 chrome.setVisible(rows, total: combined.count)

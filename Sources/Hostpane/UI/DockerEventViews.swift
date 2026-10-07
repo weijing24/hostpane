@@ -115,10 +115,7 @@ private struct DockerEventRow: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
-        )
+        .hostpaneGlassCard(cornerRadius: 14)
     }
 
     private var icon: String {

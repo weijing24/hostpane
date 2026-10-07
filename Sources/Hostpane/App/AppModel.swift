@@ -705,6 +705,16 @@ final class AppModel {
         (try? importer.lookup(alias: host.hostname)) ?? (try? importer.lookup(alias: host.name))
     }
 
+    /// Saved 经由, or the matching ~/.ssh/config ProxyJump when the field is empty.
+    /// `none` is a direct connection.
+    func effectiveProxyJump(for host: HostRecord) -> String? {
+        if host.suppressesProxyJump { return nil }
+        if let jump = HostRecord.normalizedProxyJump(host.proxyJump) {
+            return jump
+        }
+        return sshConfigMatch(for: host)?.proxyJump
+    }
+
     func applySSHConfigToEditor() {
         guard var state = editor else { return }
         let isNew = !hosts.contains { $0.id == state.record.id }
@@ -722,6 +732,9 @@ final class AppModel {
         }
         if state.record.name.isEmpty {
             state.record.name = match.name
+        }
+        if HostRecord.normalizedProxyJump(state.record.proxyJump) == nil {
+            state.record.proxyJump = match.proxyJump
         }
         editor = state
     }
@@ -745,6 +758,7 @@ final class AppModel {
             updated.authKind = .privateKey
             updated.privateKeyPath = path
         }
+        updated.proxyJump = match.proxyJump
         hosts[index] = updated
         try? store.save(hosts)
     }
@@ -772,6 +786,7 @@ final class AppModel {
         state.record.tags = HostRecord.normalizedTags(state.record.tags)
         state.record.notes = state.record.notes.trimmingCharacters(in: .whitespacesAndNewlines)
         state.record.defaultSFTPPath = HostRecord.normalizedSFTPPath(state.record.defaultSFTPPath)
+        state.record.proxyJump = HostRecord.normalizedProxyJump(state.record.proxyJump)
         guard !state.record.hostname.isEmpty else { throw HostpaneSSHError.missingHostname }
         guard !state.record.username.isEmpty else { throw HostpaneSSHError.missingUsername }
         if state.record.name.isEmpty {

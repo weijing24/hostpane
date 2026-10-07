@@ -126,10 +126,7 @@ private struct SSHKeyCard: View {
             Spacer(minLength: 8)
         }
         .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
-        )
+        .hostpaneGlassCard(cornerRadius: 16)
         .contextMenu {
             if !key.publicKey.isEmpty {
                 Button("复制公钥") { copyPublicKey() }

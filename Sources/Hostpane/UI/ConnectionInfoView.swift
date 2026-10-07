@@ -25,10 +25,7 @@ struct ConnectionInfoView: View {
             }
             .padding(22)
             .frame(maxWidth: 760)
-            .background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Color(nsColor: .windowBackgroundColor))
-            )
+            .hostpaneGlassCard(cornerRadius: 18)
             .padding(28)
             .frame(maxWidth: .infinity)
         }
@@ -63,6 +60,12 @@ struct ConnectionInfoView: View {
             Text("\(host.username)@\(host.hostname):\(host.port)")
                 .font(.body.monospaced())
                 .textSelection(.enabled)
+            if let via = model.effectiveProxyJump(for: host) {
+                Text("经由 \(via)")
+                    .font(.callout.monospaced())
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
         }
     }
 

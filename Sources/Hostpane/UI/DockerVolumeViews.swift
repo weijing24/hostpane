@@ -82,10 +82,7 @@ private struct DockerVolumeCard: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .topLeading)
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color(nsColor: .windowBackgroundColor))
-            )
+            .hostpaneGlassCard(cornerRadius: 16)
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .stroke(hovering ? HostpaneTheme.docker.opacity(0.45) : Color.secondary.opacity(0.12), lineWidth: 1)
@@ -172,7 +169,7 @@ struct DockerVolumeDetailView: View {
                         : formatDockerCreated(volume.createdAt)
                 )
             }
-            .background(cardBackground)
+            .hostpaneGlassCard(cornerRadius: 14)
         }
     }
 
@@ -197,7 +194,7 @@ struct DockerVolumeDetailView: View {
                     .padding(.vertical, 10)
                 }
             }
-            .background(cardBackground)
+            .hostpaneGlassCard(cornerRadius: 14)
         }
     }
 
@@ -230,7 +227,7 @@ struct DockerVolumeDetailView: View {
                     .buttonStyle(.plain)
                 }
             }
-            .background(cardBackground)
+            .hostpaneGlassCard(cornerRadius: 14)
         }
     }
 
@@ -244,13 +241,8 @@ struct DockerVolumeDetailView: View {
                     Task { await model.dockerRemoveVolume(host, name: volume.name) }
                 }
             }
-            .background(cardBackground)
+            .hostpaneGlassCard(cornerRadius: 14)
         }
-    }
-
-    private var cardBackground: some View {
-        RoundedRectangle(cornerRadius: 14, style: .continuous)
-            .fill(Color(nsColor: .windowBackgroundColor))
     }
 
     private func infoRow(_ title: String, _ value: String, monospaced: Bool = false) -> some View {

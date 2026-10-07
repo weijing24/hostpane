@@ -603,9 +603,6 @@ struct InspectCard<Content: View>: View {
                 maxHeight: expandsVertically ? .infinity : nil,
                 alignment: .topLeading
             )
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color(nsColor: .windowBackgroundColor))
-            )
+            .hostpaneGlassCard(cornerRadius: 16)
     }
 }

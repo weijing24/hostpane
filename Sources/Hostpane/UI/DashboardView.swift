@@ -15,12 +15,14 @@ struct DashboardView: View {
                 dark: model.settings.dashboardBackgroundDark,
                 isDark: useDarkBackground
             ) {
-                VStack(alignment: .leading, spacing: 16) {
-                    if model.settings.showTagFilter {
-                        filterRow
+                HostpaneGlassGroup(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 16) {
+                        if model.settings.showTagFilter {
+                            filterRow
+                        }
+                        summaryRow
+                        hostGrid
                     }
-                    summaryRow
-                    hostGrid
                 }
             }
             .navigationTitle("仪表板")
@@ -161,13 +163,15 @@ struct DashboardView: View {
     private func filterChip(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
-                .font(.caption)
-                .padding(.horizontal, 10)
+                .font(.caption.weight(selected ? .semibold : .regular))
+                .padding(.horizontal, 12)
                 .padding(.vertical, 6)
-                .background(
-                    Capsule().stroke(selected ? HostpaneTheme.accent.opacity(0.7) : Color.secondary.opacity(0.25))
+                .hostpaneGlass(
+                    in: Capsule(),
+                    interactive: true,
+                    tint: selected ? HostpaneTheme.accent : nil
                 )
-                .foregroundStyle(selected ? HostpaneTheme.accent : .secondary)
+                .foregroundStyle(selected ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
         }
         .buttonStyle(.plain)
     }
@@ -251,10 +255,7 @@ private struct SummaryStatCard: View {
         }
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
-        )
+        .hostpaneGlassCard(cornerRadius: 16)
     }
 }
 
@@ -274,13 +275,10 @@ private struct DashboardHostCard: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .topLeading)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(hovering ? HostpaneTheme.accent.opacity(0.7) : Color.secondary.opacity(0.12), lineWidth: 1)
+        .hostpaneGlassCard(
+            cornerRadius: 14,
+            interactive: true,
+            tint: hovering ? HostpaneTheme.accent.opacity(0.28) : nil
         )
         .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .onTapGesture(perform: onOpen)

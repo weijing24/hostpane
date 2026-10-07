@@ -196,6 +196,122 @@ func configChecks() throws {
     try expect(jump.authKind == .privateKey, "jump key auth")
 }
 
+func proxyJumpChecks() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let key = directory.appendingPathComponent("id_edge")
+    try Data("dummy".utf8).write(to: key)
+
+    let config = directory.appendingPathComponent("config")
+    try """
+    Host *
+      User fallback
+      ProxyJump edge
+    Host edge
+      HostName edge.example
+      User root
+      Port 2222
+      IdentityFile \(key.path)
+      ProxyJump none
+    Host bastion
+      HostName 10.0.0.1
+      User jump
+      ProxyJump edge
+    Host app
+      HostName 10.0.0.5
+      User ubuntu
+      ProxyJump bastion
+    Host listed
+      HostName listed.example
+      User ubuntu
+      ProxyJump edge, bastion
+    Host first-wins
+      ProxyJump first
+      ProxyJump second
+    Host loop-a
+      HostName a.example
+      User a
+      ProxyJump loop-b
+    Host loop-b
+      HostName b.example
+      User b
+      ProxyJump loop-a
+    Host direct
+      HostName direct.example
+      User ubuntu
+      ProxyJump none
+    """.write(to: config, atomically: true, encoding: .utf8)
+
+    let importer = SSHConfigImporter()
+    let hosts = try importer.importHosts(configURL: config)
+    let app = hosts.first { $0.name == "app" }!
+    try expect(app.proxyJump == "bastion", "app jump stored")
+    try expect(app.hostname == "10.0.0.5" && app.username == "ubuntu", "app target fields")
+    let edge = hosts.first { $0.name == "edge" }!
+    try expect(edge.proxyJump == nil && edge.authKind == .privateKey, "none clears jump and keeps key")
+    try expect(
+        edge.privateKeyPath == (key.path as NSString).standardizingPath,
+        "edge identity \(edge.privateKeyPath ?? "nil")"
+    )
+    let inherited = hosts.first { $0.name == "bastion" }!
+    try expect(inherited.proxyJump == "edge", "bastion jump")
+    let direct = hosts.first { $0.name == "direct" }!
+    try expect(direct.proxyJump == nil, "explicit none")
+    try expect(hosts.first { $0.name == "first-wins" }?.proxyJump == "first", "first proxyjump wins")
+
+    let chain = importer.resolveProxyJumpChain("bastion", configURL: config)
+    try expect(chain.count == 2, "nested chain length \(chain.count)")
+    try expect(
+        chain[0].host == "edge.example" && chain[0].port == 2222 && chain[0].username == "root",
+        "edge hop \(chain[0])"
+    )
+    try expect(chain[0].identityFile == edge.privateKeyPath, "edge key on hop")
+    try expect(
+        chain[1].host == "10.0.0.1" && chain[1].port == 22 && chain[1].username == "jump",
+        "bastion hop \(chain[1])"
+    )
+
+    let overridden = importer.resolveProxyJumpChain("jim@bastion:2201", configURL: config)
+    try expect(overridden.count == 2, "override still expands nested")
+    try expect(
+        overridden[1].host == "10.0.0.1" && overridden[1].port == 2201 && overridden[1].username == "jim",
+        "token user and port override \(overridden[1])"
+    )
+
+    let listed = importer.resolveProxyJumpChain(hosts.first { $0.name == "listed" }?.proxyJump, configURL: config)
+    try expect(listed.map(\.host) == ["edge.example", "10.0.0.1"], "comma chain \(listed.map(\.host))")
+
+    let loop = importer.resolveProxyJumpChain("loop-a", configURL: config)
+    try expect(loop.map(\.host) == ["b.example", "a.example"], "cycle stops \(loop.map(\.host))")
+
+    let literal = importer.resolveProxyJumpChain(
+        "ssh://deploy@db.internal:2200,[2001:db8::1]:22",
+        configURL: config
+    )
+    try expect(literal.count == 2, "literal hops")
+    try expect(
+        literal[0].host == "db.internal" && literal[0].port == 2200 && literal[0].username == "deploy",
+        "uri hop \(literal[0])"
+    )
+    try expect(literal[1].host == "2001:db8::1" && literal[1].port == 22, "ipv6 hop \(literal[1])")
+    try expect(importer.resolveProxyJumpChain("none", configURL: config).isEmpty, "none is direct")
+
+    let saved = HostRecord(name: "app", hostname: "app", username: "someone")
+    let resolved = importer.resolved(saved, configURL: config)
+    try expect(resolved.hostname == "10.0.0.5", "alias hostname \(resolved.hostname)")
+    try expect(resolved.proxyJump == "bastion", "empty via takes config jump")
+    try expect(resolved.username == "someone", "saved user stays")
+
+    var pinned = saved
+    pinned.proxyJump = "other"
+    try expect(importer.resolved(pinned, configURL: config).proxyJump == "other", "explicit via wins")
+    pinned.proxyJump = "none"
+    let forcedDirect = importer.resolved(pinned, configURL: config)
+    try expect(forcedDirect.proxyJump == nil, "none beats config jump")
+    try expect(forcedDirect.hostname == "10.0.0.5", "none still rewrites hostname")
+}
+
 func sshConfigUsernameFillChecks() throws {
     let mac = "jim"
     try expect(
@@ -355,6 +471,7 @@ func hostRecordCodableChecks() throws {
     try expect(hosts[0].group == nil, "group default")
     try expect(hosts[0].connectionKind == .ssh, "ssh default")
     try expect(hosts[0].sshKeyFingerprint == nil, "fingerprint default")
+    try expect(hosts[0].proxyJump == nil, "proxy jump default")
 
     var record = hosts[0]
     record.group = " oracle "
@@ -389,6 +506,14 @@ func hostRecordCodableChecks() throws {
     try expect(round[0].notes == "ampere", "notes roundtrip")
     try expect(round[0].showOnDashboard == false, "dashboard roundtrip")
     try expect(round[0].defaultSFTPPath == "/home/ubuntu", "sftp roundtrip")
+    try expect(round[0].proxyJump == nil, "proxy jump omitted")
+
+    record.proxyJump = " edge , bastion "
+    let encodedJump = try JSONEncoder().encode([record])
+    let jumpRound = try JSONDecoder().decode([HostRecord].self, from: encodedJump)
+    try expect(jumpRound[0].proxyJump == "edge , bastion", "proxy jump roundtrip")
+    record.proxyJump = "none"
+    try expect(record.suppressesProxyJump, "none disables jump")
 
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -913,6 +1038,7 @@ do {
     try inspectDetailChecks()
     try storageSelectionChecks()
     try configChecks()
+    try proxyJumpChecks()
     try sshConfigUsernameFillChecks()
     try hostRecordCodableChecks()
     try settingsCodableChecks()

@@ -90,10 +90,7 @@ private struct DockerImageCard: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .topLeading)
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color(nsColor: .windowBackgroundColor))
-            )
+            .hostpaneGlassCard(cornerRadius: 16)
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .stroke(hovering ? HostpaneTheme.docker.opacity(0.45) : Color.secondary.opacity(0.12), lineWidth: 1)
@@ -189,7 +186,7 @@ struct DockerImageDetailView: View {
                     infoRow("摘要", image.digestLine, monospaced: true)
                 }
             }
-            .background(cardBackground)
+            .hostpaneGlassCard(cornerRadius: 14)
         }
     }
 
@@ -206,7 +203,7 @@ struct DockerImageDetailView: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(cardBackground)
+            .hostpaneGlassCard(cornerRadius: 14)
         }
     }
 
@@ -239,7 +236,7 @@ struct DockerImageDetailView: View {
                     .buttonStyle(.plain)
                 }
             }
-            .background(cardBackground)
+            .hostpaneGlassCard(cornerRadius: 14)
         }
     }
 
@@ -276,7 +273,7 @@ struct DockerImageDetailView: View {
                 }
             }
             .padding(14)
-            .background(cardBackground)
+            .hostpaneGlassCard(cornerRadius: 14)
         }
     }
 
@@ -294,7 +291,7 @@ struct DockerImageDetailView: View {
                     Task { await model.dockerRemoveImage(host, image: image) }
                 }
             }
-            .background(cardBackground)
+            .hostpaneGlassCard(cornerRadius: 14)
         }
     }
 
@@ -319,11 +316,6 @@ struct DockerImageDetailView: View {
         }
         .padding(20)
         .frame(width: 360)
-    }
-
-    private var cardBackground: some View {
-        RoundedRectangle(cornerRadius: 14, style: .continuous)
-            .fill(Color(nsColor: .windowBackgroundColor))
     }
 
     private func infoRow(_ title: String, _ value: String, monospaced: Bool = false) -> some View {

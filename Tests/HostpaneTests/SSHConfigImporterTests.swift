@@ -54,6 +54,44 @@ final class SSHConfigImporterTests: XCTestCase {
         let jump = try XCTUnwrap(hosts.first { $0.name == "jump-only" })
         XCTAssertEqual(jump.authKind, .privateKey)
         XCTAssertTrue(jump.privateKeyPath?.hasSuffix("id_ed25519") == true)
+        XCTAssertNil(jp01.proxyJump)
+    }
+
+    func testProxyJumpChainResolvesAliasesInOrder() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let config = directory.appendingPathComponent("config")
+        try """
+        Host edge
+          HostName edge.example
+          User root
+          Port 2222
+          ProxyJump none
+        Host bastion
+          HostName 10.0.0.1
+          User jump
+          ProxyJump edge
+        Host app
+          HostName 10.0.0.5
+          User ubuntu
+          ProxyJump bastion
+        """.write(to: config, atomically: true, encoding: .utf8)
+
+        let importer = SSHConfigImporter()
+        let app = try XCTUnwrap(try importer.importHosts(configURL: config).first { $0.name == "app" })
+        XCTAssertEqual(app.proxyJump, "bastion")
+        let chain = importer.resolveProxyJumpChain(app.proxyJump, configURL: config)
+        XCTAssertEqual(chain.map(\.host), ["edge.example", "10.0.0.1"])
+        XCTAssertEqual(chain[0].username, "root")
+        XCTAssertEqual(chain[0].port, 2222)
+        XCTAssertEqual(chain[1].username, "jump")
+
+        let saved = HostRecord(name: "app", hostname: "app", username: "someone")
+        let resolved = importer.resolved(saved, configURL: config)
+        XCTAssertEqual(resolved.hostname, "10.0.0.5")
+        XCTAssertEqual(resolved.proxyJump, "bastion")
+        XCTAssertEqual(resolved.username, "someone")
     }
 
     func testUsernameFillIgnoresTypedValues() {

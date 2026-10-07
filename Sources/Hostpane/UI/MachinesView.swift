@@ -14,6 +14,7 @@ struct MachinesView: View {
         @Bindable var model = model
         NavigationStack {
         ScrollView {
+            HostpaneGlassGroup(spacing: 16) {
             VStack(alignment: .leading, spacing: 16) {
                 if model.settings.showTagFilter {
                     HStack {
@@ -72,8 +73,10 @@ struct MachinesView: View {
                 }
             }
             .padding(24)
+            }
         }
         .background(HostpaneTheme.page)
+        .hostpaneExtendsUnderSidebar()
         .navigationTitle(model.isBatchEditing ? "已选 \(model.selectedHostIDs.count) 台" : "机器")
         .toolbar {
             if model.isBatchEditing {
@@ -148,13 +151,15 @@ struct MachinesView: View {
     private func filterChip(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
-                .font(.caption)
-                .padding(.horizontal, 10)
+                .font(.caption.weight(selected ? .semibold : .regular))
+                .padding(.horizontal, 12)
                 .padding(.vertical, 6)
-                .background(
-                    Capsule().stroke(selected ? HostpaneTheme.accent.opacity(0.7) : Color.secondary.opacity(0.25))
+                .hostpaneGlass(
+                    in: Capsule(),
+                    interactive: true,
+                    tint: selected ? HostpaneTheme.accent : nil
                 )
-                .foregroundStyle(selected ? HostpaneTheme.accent : .secondary)
+                .foregroundStyle(selected ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
         }
         .buttonStyle(.plain)
     }
@@ -213,16 +218,10 @@ private struct MachineCard: View {
             }
         }
         .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(
-                    (selected || hovering) ? HostpaneTheme.accent.opacity(0.7) : Color.secondary.opacity(0.12),
-                    lineWidth: 1.5
-                )
+        .hostpaneGlassCard(
+            cornerRadius: 16,
+            interactive: true,
+            tint: (selected || hovering) ? HostpaneTheme.accent.opacity(selected ? 0.38 : 0.22) : nil
         )
         .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .onTapGesture(perform: onOpen)
@@ -288,7 +287,7 @@ struct CircleActionButton: View {
                 .font(.body.weight(.semibold))
                 .foregroundStyle(hovering ? activeForeground : idleForeground)
                 .frame(width: 36, height: 36)
-                .background(Circle().fill(hovering ? activeFill : idleFill))
+                .hostpaneGlass(in: Circle(), interactive: true, tint: hovering ? activeFill : idleFill)
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)

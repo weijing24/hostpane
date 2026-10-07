@@ -86,6 +86,10 @@ struct HostEditorView: View {
             TextField("用户名", text: binding(\.record.username, editor))
             sshConfigUsernameHint(editor)
             TextField("端口", value: binding(\.record.port, editor), format: .number)
+            TextField("经由", text: optionalString(editor, \.proxyJump), prompt: Text("bastion 或 edge,bastion"))
+            Text("对应 ~/.ssh/config 的 ProxyJump。留空则沿用配置里的跳板；填 none 则直连。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
             Picker("认证", selection: binding(\.record.authKind, editor)) {
                 ForEach(AuthKind.allCases) { kind in
                     Text(kind.title).tag(kind)

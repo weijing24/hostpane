@@ -100,10 +100,7 @@ private struct DockerNetworkCard: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .topLeading)
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color(nsColor: .windowBackgroundColor))
-            )
+            .hostpaneGlassCard(cornerRadius: 16)
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .stroke(hovering ? HostpaneTheme.docker.opacity(0.45) : Color.secondary.opacity(0.12), lineWidth: 1)
@@ -182,7 +179,7 @@ struct DockerNetworkDetailView: View {
                 infoRow("驱动", network.driver.isEmpty ? "—" : network.driver)
                 infoRow("范围", network.scope.isEmpty ? "—" : network.scope)
             }
-            .background(cardBackground)
+            .hostpaneGlassCard(cornerRadius: 14)
         }
     }
 
@@ -194,7 +191,7 @@ struct DockerNetworkDetailView: View {
                 infoRow("子网", network.subnet.isEmpty ? "—" : network.subnet)
                 infoRow("网关", network.gateway.isEmpty ? "—" : network.gateway)
             }
-            .background(cardBackground)
+            .hostpaneGlassCard(cornerRadius: 14)
         }
     }
 
@@ -224,7 +221,7 @@ struct DockerNetworkDetailView: View {
                     .buttonStyle(.plain)
                 }
             }
-            .background(cardBackground)
+            .hostpaneGlassCard(cornerRadius: 14)
         }
     }
 
@@ -240,18 +237,13 @@ struct DockerNetworkDetailView: View {
                     }
                 }
             }
-            .background(cardBackground)
+            .hostpaneGlassCard(cornerRadius: 14)
             if network.isBuiltin {
                 Text("无法删除内置网络。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
-    }
-
-    private var cardBackground: some View {
-        RoundedRectangle(cornerRadius: 14, style: .continuous)
-            .fill(Color(nsColor: .windowBackgroundColor))
     }
 
     private func infoRow(_ title: String, _ value: String) -> some View {

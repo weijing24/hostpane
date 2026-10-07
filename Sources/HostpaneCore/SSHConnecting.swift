@@ -24,6 +24,7 @@ public enum HostpaneSSHError: Error, LocalizedError {
     case missingPassword
     case missingPrivateKey
     case noAuthenticationMethods
+    case jumpHasNoAuthentication(String)
     case notConnected
     case unsupportedOS(String)
 
@@ -41,6 +42,8 @@ public enum HostpaneSSHError: Error, LocalizedError {
             return "私钥文件不存在或无法读取。"
         case .noAuthenticationMethods:
             return "没有可用的 SSH 认证方式。请启动 ssh-agent、选择密钥，或保存密码。"
+        case .jumpHasNoAuthentication(let hop):
+            return "跳板 \(hop) 没有可用的 SSH 认证方式。请启动 ssh-agent，或在该 Host 上配置可读的 IdentityFile。"
         case .notConnected:
             return "尚未连接。"
         case .unsupportedOS(let name):
@@ -134,19 +137,115 @@ public actor SSHEngine {
                 ? settings.sftpKeepAliveSeconds
                 : Int(SSHKeepalivePolicy.defaultInterval)
         }
+        let hostKeyPolicy: SSHHostKeyPolicy = settings.alwaysTrustHostKeys
+            ? .acceptAnyVerifiedHostKey
+            : .trustOnFirstUse(using: hostKeyStore)
+        let keepalivePolicy = SSHKeepalivePolicy(
+            interval: TimeInterval(AppSettings.clampedSeconds(keepAliveSeconds))
+        )
+        let timeoutPolicy = SSHTimeoutPolicy(connectionSetupTimeInterval: timeout)
+        let proxyJumpHosts = try await makeProxyJumpHosts(
+            for: host,
+            secrets: secrets,
+            overrides: overrides,
+            hostKeyPolicy: hostKeyPolicy,
+            keepalivePolicy: keepalivePolicy,
+            timeoutPolicy: timeoutPolicy
+        )
         return SSHClientConfiguration(
             host: host.hostname,
             port: host.sshPort,
             username: host.username,
             authenticationMethods: methods,
-            hostKeyPolicy: settings.alwaysTrustHostKeys
-                ? .acceptAnyVerifiedHostKey
-                : .trustOnFirstUse(using: hostKeyStore),
-            keepalivePolicy: SSHKeepalivePolicy(
-                interval: TimeInterval(AppSettings.clampedSeconds(keepAliveSeconds))
-            ),
-            timeoutPolicy: SSHTimeoutPolicy(connectionSetupTimeInterval: timeout)
+            hostKeyPolicy: hostKeyPolicy,
+            keepalivePolicy: keepalivePolicy,
+            timeoutPolicy: timeoutPolicy,
+            proxyJumpHosts: proxyJumpHosts
         )
+    }
+
+    private func makeProxyJumpHosts(
+        for host: HostRecord,
+        secrets: SecretStore,
+        overrides: SSHSecretOverrides,
+        hostKeyPolicy: SSHHostKeyPolicy,
+        keepalivePolicy: SSHKeepalivePolicy,
+        timeoutPolicy: SSHTimeoutPolicy
+    ) async throws -> [SSHProxyJumpHost] {
+        let hops = sshConfig.resolveProxyJumpChain(host.proxyJump)
+        guard !hops.isEmpty else { return [] }
+        let agent = await agentMethods(preferredFingerprint: nil)
+        let fallbackKeys = defaultKeyMethods(passphrase: nil)
+        var jumpHosts: [SSHProxyJumpHost] = []
+        for hop in hops {
+            let methods = try jumpAuthenticationMethods(
+                hop: hop,
+                target: host,
+                secrets: secrets,
+                overrides: overrides,
+                agent: agent,
+                fallbackKeys: fallbackKeys
+            )
+            guard hop.port >= 1, hop.port <= 65_535 else { throw HostpaneSSHError.invalidPort }
+            guard !hop.username.isEmpty else { throw HostpaneSSHError.missingUsername }
+            jumpHosts.append(
+                SSHProxyJumpHost(
+                    host: hop.host,
+                    port: UInt16(hop.port),
+                    username: hop.username,
+                    authenticationMethods: methods,
+                    hostKeyPolicy: hostKeyPolicy,
+                    keepalivePolicy: keepalivePolicy,
+                    timeoutPolicy: timeoutPolicy
+                )
+            )
+        }
+        return jumpHosts
+    }
+
+    private func jumpAuthenticationMethods(
+        hop: SSHConfigImporter.ResolvedProxyHop,
+        target: HostRecord,
+        secrets: SecretStore,
+        overrides: SSHSecretOverrides,
+        agent: [SSHAuthenticationMethod],
+        fallbackKeys: [SSHAuthenticationMethod]
+    ) throws -> [SSHAuthenticationMethod] {
+        var methods: [SSHAuthenticationMethod] = []
+        if let path = hop.identityFile, FileManager.default.isReadableFile(atPath: path) {
+            let passphrase = passphraseForJumpIdentity(
+                path,
+                target: target,
+                secrets: secrets,
+                overrides: overrides
+            )
+            if let method = privateKeyMethod(path: path, passphrase: passphrase) {
+                methods.append(method)
+            } else if passphrase != nil, let method = privateKeyMethod(path: path, passphrase: nil) {
+                methods.append(method)
+            }
+        }
+        methods.append(contentsOf: agent)
+        if hop.identityFile == nil || methods.isEmpty {
+            methods.append(contentsOf: fallbackKeys)
+        }
+        guard !methods.isEmpty else { throw HostpaneSSHError.jumpHasNoAuthentication(hop.host) }
+        return methods
+    }
+
+    private func passphraseForJumpIdentity(
+        _ path: String,
+        target: HostRecord,
+        secrets: SecretStore,
+        overrides: SSHSecretOverrides
+    ) -> String? {
+        guard target.privateKeyPath == path else { return nil }
+        let stored = try? secrets.get(account: secrets.passphraseAccount(for: target.id))
+        return nonEmpty(overrides.passphrase) ?? nonEmpty(stored)
+    }
+
+    private func privateKeyMethod(path: String, passphrase: String?) -> SSHAuthenticationMethod? {
+        try? SSHAuthenticationMethod.privateKeyPEM(contentsOfFile: path, passphrase: passphrase)
     }
 
     private func authenticationMethods(

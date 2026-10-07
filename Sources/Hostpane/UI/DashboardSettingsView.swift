@@ -7,86 +7,68 @@ struct DashboardSettingsView: View {
 
     var body: some View {
         @Bindable var model = model
-        Form {
-            Section {
-                settingsLink("仪表板背景", systemImage: "photo") {
-                    openPage(.dashboardBackground)
-                }
-            } header: {
-                Text("外观")
-            }
-
-            Section {
-                settingsLink("状态详情布局", systemImage: "rectangle.split.2x2") {
-                    openPage(.statusLayout)
-                }
-            } header: {
-                Text("状态详情")
-            }
-
-            Section {
-                Picker("刷新间隔", selection: $model.settings.statusRefreshSeconds) {
-                    ForEach(AppSettings.statusRefreshChoices, id: \.self) { seconds in
-                        Text("\(seconds) 秒").tag(seconds)
+        VStack(alignment: .leading, spacing: 26) {
+            SettingsGroup(
+                title: "刷新",
+                footer: "上一次采集返回之后，再等待这段时间，才发送下一次机器状态请求。"
+            ) {
+                SettingsLabeledRow(title: "刷新间隔") {
+                    Picker("刷新间隔", selection: $model.settings.statusRefreshSeconds) {
+                        ForEach(AppSettings.statusRefreshChoices, id: \.self) { seconds in
+                            Text("\(seconds) 秒").tag(seconds)
+                        }
                     }
+                    .labelsHidden()
+                    .fixedSize()
                 }
-                .pickerStyle(.menu)
-            } header: {
-                Text("状态刷新")
-            } footer: {
-                Text("上一次采集返回之后，再等待这段时间，才发送下一次机器状态请求。")
             }
 
-            Section {
-                Toggle("显示标签筛选", isOn: $model.settings.showTagFilter)
+            SettingsGroup(
+                title: "延迟",
+                footer: "这台 Mac 到服务器的近似 SSH 往返时间。延迟探测和状态采集分开计时。"
+            ) {
+                SettingsToggleRow(title: "显示延迟", isOn: $model.settings.showLatency)
+                SettingsHairline()
+                SettingsToggleRow(title: "延迟显示颜色", isOn: $model.settings.latencyUsesColor)
+                SettingsHairline()
+                SettingsLabeledRow(title: "刷新间隔") {
+                    Stepper(value: $model.settings.latencyRefreshSeconds, in: 5...120) {
+                        Text("每 \(model.settings.latencyRefreshSeconds) 秒")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                    .fixedSize()
+                }
+            }
+
+            SettingsGroup(
+                title: "显示",
+                footer: "标签筛选会显示在机器列表和仪表板上。服务器列表标签只控制机器卡片上的标签。打开减少动画后，仪表板和状态详情不再播放环形图和悬停过渡。"
+            ) {
+                SettingsToggleRow(title: "显示标签筛选", isOn: $model.settings.showTagFilter)
                     .onChange(of: model.settings.showTagFilter) { _, shown in
                         if !shown {
                             model.dashboardFilter = .all
                             model.machineFilter = .all
                         }
                     }
-                Toggle("服务器列表显示标签", isOn: $model.settings.showTagsOnMachines)
-            } header: {
-                Text("标签")
-            } footer: {
-                Text("标签筛选会显示在机器列表和仪表板上。服务器列表标签只控制机器卡片上的标签。")
+                SettingsHairline()
+                SettingsToggleRow(title: "服务器列表显示标签", isOn: $model.settings.showTagsOnMachines)
+                SettingsHairline()
+                SettingsToggleRow(title: "减少实时状态动画", isOn: $model.settings.reduceStatusMotion)
             }
 
-            Section {
-                Toggle("显示延迟", isOn: $model.settings.showLatency)
-                Toggle("延迟显示颜色", isOn: $model.settings.latencyUsesColor)
-                Stepper(value: $model.settings.latencyRefreshSeconds, in: 5...120) {
-                    Text("每 \(model.settings.latencyRefreshSeconds) 秒刷新一次")
+            SettingsGroup(title: "外观") {
+                SettingsChevronRow(title: "仪表板背景") {
+                    openPage(.dashboardBackground)
                 }
-            } header: {
-                Text("延迟显示")
-            } footer: {
-                Text("这台 Mac 到服务器的近似 SSH 往返时间。延迟探测和状态采集分开计时。")
-            }
-
-            Section {
-                Toggle("减少实时状态动画", isOn: $model.settings.reduceStatusMotion)
-            } header: {
-                Text("动态效果")
-            } footer: {
-                Text("打开后，仪表板和状态详情不再播放环形图和悬停过渡。")
+                SettingsHairline()
+                SettingsChevronRow(title: "状态详情布局") {
+                    openPage(.statusLayout)
+                }
             }
         }
-        .formStyle(.grouped)
-    }
-
-    private func settingsLink(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack {
-                Label(title, systemImage: systemImage)
-                Spacer(minLength: 8)
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
     }
 }
 
@@ -105,9 +87,11 @@ struct DashboardBackgroundSettingsView: View {
 
     var body: some View {
         @Bindable var model = model
-        Form {
-            Section {
-                VStack(alignment: .leading, spacing: 12) {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 26) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("预览")
+                        .font(.system(size: 15, weight: .semibold))
                     HStack(spacing: 6) {
                         ForEach(BackgroundPalette.allCases) { mode in
                             Button {
@@ -128,35 +112,38 @@ struct DashboardBackgroundSettingsView: View {
                     .frame(maxWidth: 220)
                     DashboardBackgroundPreview(background: selection, dark: palette.isDark)
                 }
-                .padding(.vertical, 4)
-            } header: {
-                Text("预览")
-            }
-
-            Section {
-                ForEach(DashboardBackground.allCases) { background in
-                    Button {
-                        setBackground(background)
-                    } label: {
-                        HStack(spacing: 12) {
-                            Text(background.title)
-                                .foregroundStyle(.primary)
-                            Spacer(minLength: 12)
-                            DashboardBackgroundSwatch(background: background, dark: palette.isDark)
-                            Image(systemName: selection == background ? "circle.inset.filled" : "circle")
-                                .foregroundStyle(selection == background ? HostpaneTheme.accent : Color.secondary.opacity(0.45))
+                SettingsGroup(
+                    title: palette.isDark ? "深色模式背景" : "浅色模式背景",
+                    footer: "适用于仪表板和状态详情。暗色列表只在深色外观下使用。"
+                ) {
+                    ForEach(Array(DashboardBackground.allCases.enumerated()), id: \.element.id) { index, background in
+                        if index > 0 {
+                            SettingsHairline()
                         }
-                        .contentShape(Rectangle())
+                        Button {
+                            setBackground(background)
+                        } label: {
+                            HStack(spacing: 12) {
+                                Text(background.title)
+                                    .font(.system(size: 14))
+                                    .foregroundStyle(.primary)
+                                Spacer(minLength: 12)
+                                DashboardBackgroundSwatch(background: background, dark: palette.isDark)
+                                Image(systemName: selection == background ? "circle.inset.filled" : "circle")
+                                    .foregroundStyle(selection == background ? HostpaneTheme.accent : Color.secondary.opacity(0.45))
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
-            } header: {
-                Text(palette.isDark ? "深色模式背景" : "浅色模式背景")
-            } footer: {
-                Text("适用于仪表板和状态详情。暗色列表只在深色外观下使用。")
             }
+            .padding(.horizontal, 28)
+            .padding(.bottom, 28)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .formStyle(.grouped)
         .onAppear {
             if model.isDarkAppearance {
                 palette = .dark
@@ -187,8 +174,7 @@ struct StatusLayoutEditorView: View {
             VStack(alignment: .leading, spacing: 20) {
                 HStack {
                     Text("列数")
-                        .font(.headline)
-                    Spacer()
+                        .font(.system(size: 15, weight: .semibold))
                     Picker("列数", selection: columnsBinding) {
                         ForEach(1...4, id: \.self) { count in
                             Text("\(count)").tag(count)
@@ -196,6 +182,16 @@ struct StatusLayoutEditorView: View {
                     }
                     .pickerStyle(.segmented)
                     .frame(width: 200)
+                    Spacer()
+                    Button(action: removeSelected) {
+                        Image(systemName: "trash")
+                    }
+                    .help("从画布移除")
+                    .disabled(selected == nil)
+                    Button(action: restoreDefaultLayout) {
+                        Image(systemName: "arrow.counterclockwise")
+                    }
+                    .help("恢复默认布局")
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
@@ -234,29 +230,19 @@ struct StatusLayoutEditorView: View {
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .background(HostpaneTheme.page)
-        .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                Button {
-                    guard let selected else { return }
-                    var layout = model.settings.statusLayout
-                    layout.remove(selected)
-                    model.settings.statusLayout = layout
-                    self.selected = nil
-                } label: {
-                    Image(systemName: "trash")
-                }
-                .help("从画布移除")
-                .disabled(selected == nil)
-                Button {
-                    model.settings.statusLayout = .default
-                    selected = nil
-                } label: {
-                    Image(systemName: "arrow.counterclockwise")
-                }
-                .help("恢复默认布局")
-            }
-        }
+    }
+
+    private func removeSelected() {
+        guard let selected else { return }
+        var layout = model.settings.statusLayout
+        layout.remove(selected)
+        model.settings.statusLayout = layout
+        self.selected = nil
+    }
+
+    private func restoreDefaultLayout() {
+        model.settings.statusLayout = .default
+        selected = nil
     }
 
     private var columnsBinding: Binding<Int> {
@@ -296,10 +282,7 @@ struct StatusLayoutEditorView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
-        )
+        .hostpaneGlassCard(cornerRadius: 12)
     }
 
     private func placementBinding(_ keyPath: WritableKeyPath<StatusCardPlacement, Int>) -> Binding<Int> {
@@ -356,6 +339,7 @@ struct DashboardScrollBackdrop<Content: View>: View {
                     }
             }
             .scrollContentBackground(.hidden)
+            .hostpaneExtendsUnderSidebar()
         }
     }
 }
@@ -397,10 +381,7 @@ private struct DashboardBackgroundPreview: View {
                 }
             }
             .padding(12)
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color(nsColor: .windowBackgroundColor))
-            )
+            .hostpaneGlassCard(cornerRadius: 14)
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -423,10 +404,7 @@ private struct DashboardBackgroundPreview: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
-        )
+        .hostpaneGlassCard(cornerRadius: 12)
     }
 
     private func meta(_ symbol: String, _ text: String) -> some View {
@@ -544,10 +522,7 @@ private struct StatusLayoutPreviewCard: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
-        )
+        .hostpaneGlassCard(cornerRadius: 14)
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(selected ? HostpaneTheme.accent : Color.secondary.opacity(0.16), lineWidth: selected ? 2 : 1)

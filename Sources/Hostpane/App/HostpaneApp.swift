@@ -68,6 +68,6 @@ struct HostpaneApp: App {
                 .preferredColorScheme(model.settings.appearance.colorScheme)
         }
         .windowToolbarStyle(.unified)
-        .defaultSize(width: 560, height: 640)
+        .defaultSize(width: 980, height: 720)
     }
 }

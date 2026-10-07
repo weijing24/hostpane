@@ -30,7 +30,7 @@ struct SSHImportView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(row.host.displayName)
                                 .foregroundStyle(.primary)
-                            Text("\(row.host.username)@\(row.host.hostname):\(row.host.port)")
+                            Text(importEndpoint(row.host))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -76,5 +76,13 @@ struct SSHImportView: View {
                 .padding(.horizontal, 20)
                 .padding(.vertical, 10)
         }
+    }
+
+    private func importEndpoint(_ host: HostRecord) -> String {
+        var line = "\(host.username)@\(host.hostname):\(host.port)"
+        if let via = host.proxyJump, !host.suppressesProxyJump {
+            line += " · 经由 \(via)"
+        }
+        return line
     }
 }

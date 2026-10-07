@@ -15,6 +15,7 @@ struct ContentView: View {
                 )
         } detail: {
             detail
+                .hostpaneExtendsUnderSidebar()
                 .id(model.sidebarSelection)
         }
         .navigationSplitViewStyle(.balanced)

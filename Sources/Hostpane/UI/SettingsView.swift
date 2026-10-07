@@ -49,7 +49,6 @@ final class LogPageChrome {
 }
 
 enum SettingsPage: Hashable {
-    case dashboard
     case dashboardBackground
     case statusLayout
     case terminalLog
@@ -57,7 +56,6 @@ enum SettingsPage: Hashable {
 
     var title: String {
         switch self {
-        case .dashboard: return "仪表板"
         case .dashboardBackground: return "仪表板背景"
         case .statusLayout: return "状态详情布局"
         case .terminalLog: return "终端调试日志"
@@ -69,44 +67,189 @@ enum SettingsPage: Hashable {
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @State private var cacheMessage: String?
+    @State private var tab: SettingsTab = .dashboard
     @State private var pages: [SettingsPage] = []
+    @State private var query = ""
+    @State private var hoveredTab: SettingsTab?
     @State private var logChrome = LogPageChrome()
 
     var body: some View {
         @Bindable var model = model
-        page
-            .frame(minWidth: 520, minHeight: 560)
-            .modifier(HiddenWindowTitle())
-            .background {
-                SettingsTitlebarLeading(
-                    title: pages.last?.title ?? "设置",
-                    showsBack: !pages.isEmpty,
-                    showsLogTools: pages.last == .appLog,
-                    logChrome: logChrome
-                ) {
-                    if !pages.isEmpty { pages.removeLast() }
+        HStack(spacing: 0) {
+            sidebar
+            Rectangle()
+                .fill(Color.primary.opacity(0.08))
+                .frame(width: 1)
+            detail
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .frame(minWidth: 880, minHeight: 620)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .modifier(HiddenWindowTitle())
+        .onChange(of: model.settings) { _, _ in
+            model.persistSettings()
+        }
+        .alert("快速查看缓存", isPresented: Binding(
+            get: { cacheMessage != nil },
+            set: { if !$0 { cacheMessage = nil } }
+        )) {
+            Button("好", role: .cancel) { cacheMessage = nil }
+        } message: {
+            Text(cacheMessage ?? "")
+        }
+    }
+
+    private var sidebar: some View {
+        let sections = SettingsTabSection.allCases.compactMap { section -> (SettingsTabSection, [SettingsTab])? in
+            let tabs = SettingsTab.allCases.filter { $0.section == section && $0.matches(query) }
+            return tabs.isEmpty ? nil : (section, tabs)
+        }
+        return VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField("搜索", text: $query)
+                    .textFieldStyle(.plain)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .hostpaneGlass(in: RoundedRectangle(cornerRadius: 10, style: .continuous), interactive: true)
+            ScrollView {
+                if sections.isEmpty {
+                    Text("没有匹配的设置")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    VStack(alignment: .leading, spacing: 18) {
+                        ForEach(sections, id: \.0.id) { pair in
+                            let section = pair.0
+                            let tabs = pair.1
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(section.rawValue)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 10)
+                                    .padding(.bottom, 4)
+                                ForEach(tabs) { item in
+                                    sidebarRow(item)
+                                }
+                            }
+                        }
+                    }
                 }
             }
-            .onChange(of: model.settings) { _, _ in
-                model.persistSettings()
+            .scrollIndicators(.hidden)
+        }
+        .padding(12)
+        .frame(width: SettingsChrome.sidebarWidth)
+        .frame(maxHeight: .infinity, alignment: .top)
+    }
+
+    private func sidebarRow(_ item: SettingsTab) -> some View {
+        let selected = tab == item
+        return Button {
+            tab = item
+            pages.removeAll()
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: item.symbol)
+                    .font(.system(size: 14))
+                    .foregroundStyle(item.tint)
+                    .frame(width: 22)
+                Text(item.title)
+                    .font(.system(size: 14, weight: selected ? .semibold : .regular))
+                    .foregroundStyle(.primary)
+                Spacer(minLength: 0)
             }
-            .alert("快速查看缓存", isPresented: Binding(
-                get: { cacheMessage != nil },
-                set: { if !$0 { cacheMessage = nil } }
-            )) {
-                Button("好", role: .cancel) { cacheMessage = nil }
-            } message: {
-                Text(cacheMessage ?? "")
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .modifier(SettingsSidebarGlass(active: selected || hoveredTab == item, tinted: selected))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            hoveredTab = hovering ? item : (hoveredTab == item ? nil : hoveredTab)
+        }
+    }
+
+    private var detail: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            detailHeader
+                .padding(.horizontal, 28)
+                .padding(.top, 18)
+                .padding(.bottom, 12)
+            detailBody
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var detailTitle: String {
+        pages.last?.title ?? tab.title
+    }
+
+    private var detailHeader: some View {
+        HStack(spacing: 10) {
+            if !pages.isEmpty {
+                Button {
+                    pages.removeLast()
+                } label: {
+                    Image(systemName: "chevron.backward")
+                        .font(.system(size: 13, weight: .semibold))
+                        .frame(width: 28, height: 28)
+                        .background(Color.primary.opacity(0.06), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .help("返回")
             }
+            Text(detailTitle)
+                .font(.system(size: 22, weight: .bold))
+            Spacer(minLength: 12)
+            if pages.last == .appLog {
+                logTools
+            }
+        }
+    }
+
+    private var logTools: some View {
+        @Bindable var chrome = logChrome
+        return HStack(spacing: 8) {
+            HStack(spacing: 2) {
+                logTool("arrow.clockwise", help: "刷新", enabled: true) { chrome.performReload() }
+                logTool("doc.on.doc", help: "复制", enabled: chrome.canCopy) { chrome.performCopy() }
+                logTool("trash", help: "清除", enabled: chrome.canClear) { chrome.requestClear() }
+            }
+            .padding(.horizontal, 4)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(Color.primary.opacity(0.06)))
+            TextField("搜索日志", text: $chrome.query)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 200)
+        }
+    }
+
+    private func logTool(_ symbol: String, help: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 13))
+                .frame(width: 28, height: 26)
+        }
+        .buttonStyle(.borderless)
+        .disabled(!enabled)
+        .help(help)
     }
 
     @ViewBuilder
-    private var page: some View {
+    private var detailBody: some View {
         switch pages.last {
         case nil:
-            rootForm
-        case .dashboard:
-            DashboardSettingsView { pages.append($0) }
+            ScrollView {
+                tabBody
+                    .padding(.horizontal, 28)
+                    .padding(.bottom, 28)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         case .dashboardBackground:
             DashboardBackgroundSettingsView()
         case .statusLayout:
@@ -118,62 +261,90 @@ struct SettingsView: View {
         }
     }
 
-    private var rootForm: some View {
-        Form {
-            appearanceSection
-            syncSection
-            connectionSection
-            terminalSection
-            sftpSection
-            loggingSection
-        }
-        .formStyle(.grouped)
-    }
-
     @ViewBuilder
-    private var appearanceSection: some View {
-        @Bindable var model = model
-        Section {
-            settingsRow("仪表板", systemImage: "gauge.with.needle") {
-                pages.append(.dashboard)
-            }
-            Picker("外观", selection: $model.settings.appearance) {
-                ForEach(AppearancePreference.allCases) { option in
-                    Text(option.title).tag(option)
-                }
-            }
-        } header: {
-            Text("外观")
-        } footer: {
-            Text("浅色和深色会覆盖系统外观。终端调色板跟着这里走。")
+    private var tabBody: some View {
+        switch tab {
+        case .general:
+            generalPane
+        case .security:
+            securityPane
+        case .sync:
+            syncPane
+        case .connection:
+            connectionPane
+        case .dashboard:
+            DashboardSettingsView { pages.append($0) }
+        case .terminal:
+            terminalPane
+        case .sftp:
+            sftpPane
+        case .diagnostics:
+            diagnosticsPane
         }
     }
 
     @ViewBuilder
-    private var syncSection: some View {
+    private var generalPane: some View {
         @Bindable var model = model
-        Section {
-            Picker("同步位置", selection: syncDestinationBinding) {
-                ForEach(ConfigSyncDestination.allCases) { destination in
-                    Text(destination.title).tag(destination)
+        SettingsGroup(
+            title: "外观",
+            footer: "浅色和深色会覆盖系统外观。终端调色板跟着这里走。"
+        ) {
+            SettingsLabeledRow(title: "外观") {
+                Picker("外观", selection: $model.settings.appearance) {
+                    ForEach(AppearancePreference.allCases) { option in
+                        Text(option.title).tag(option)
+                    }
                 }
+                .labelsHidden()
+                .fixedSize()
             }
-            HStack {
-                Text("同步状态")
-                Spacer()
+        }
+    }
+
+    @ViewBuilder
+    private var securityPane: some View {
+        @Bindable var model = model
+        SettingsGroup(
+            title: "主机密钥",
+            footer: "启用后，Hostpane 会接受新的或已更改的主机密钥，不再按首次信任固定。只适合你完全控制的环境。"
+        ) {
+            SettingsToggleRow(title: "始终信任主机密钥", isOn: $model.settings.alwaysTrustHostKeys)
+        }
+    }
+
+    @ViewBuilder
+    private var syncPane: some View {
+        @Bindable var model = model
+        SettingsGroup(
+            title: "数据同步",
+            footer: "主机簿、设置和密钥列表会放到 iCloud Drive 或 Dropbox 里由系统同步。密码留在本机钥匙串，不会上传。两台电脑同时改同一份列表时，后保存的会覆盖先保存的；切到已有数据的位置时会先问你保留哪边。"
+        ) {
+            SettingsLabeledRow(title: "同步位置") {
+                Picker("同步位置", selection: syncDestinationBinding) {
+                    ForEach(ConfigSyncDestination.allCases) { destination in
+                        Text(destination.title).tag(destination)
+                    }
+                }
+                .labelsHidden()
+                .fixedSize()
+            }
+            SettingsHairline()
+            SettingsLabeledRow(title: "同步状态") {
                 Label(syncStatusText, systemImage: ConfigSync.destination.statusSymbol)
+                    .font(.system(size: 14))
                     .foregroundStyle(.secondary)
                     .labelStyle(.titleAndIcon)
             }
             if let notice = model.configSyncNotice {
+                SettingsHairline()
                 Text(notice)
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.orange)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 11)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-        } header: {
-            Text("数据同步")
-        } footer: {
-            Text("主机簿、设置和密钥列表会放到 iCloud Drive 或 Dropbox 里由系统同步。密码留在本机钥匙串，不会上传。两台电脑同时改同一份列表时，后保存的会覆盖先保存的；切到已有数据的位置时会先问你保留哪边。")
         }
         .alert(
             "无法切换同步位置",
@@ -254,103 +425,121 @@ struct SettingsView: View {
     }
 
     @ViewBuilder
-    private var connectionSection: some View {
+    private var connectionPane: some View {
         @Bindable var model = model
-        Section {
-            Stepper(value: $model.settings.connectionTimeoutSeconds, in: 5...120) {
-                Label(
-                    "连接超时：\(model.settings.connectionTimeoutSeconds) 秒",
-                    systemImage: "clock"
-                )
+        SettingsGroup(
+            title: "超时",
+            footer: "建立 SSH 连接时，超过这段时间还没连上就停止。"
+        ) {
+            SettingsLabeledRow(title: "连接超时") {
+                Stepper(value: $model.settings.connectionTimeoutSeconds, in: 5...120) {
+                    Text("\(model.settings.connectionTimeoutSeconds) 秒")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                .fixedSize()
             }
-            Toggle(isOn: $model.settings.alwaysTrustHostKeys) {
-                Label("始终信任主机密钥", systemImage: "network")
-            }
-        } header: {
-            Text("连接")
-        } footer: {
-            Text("启用后，Hostpane 会接受新的或已更改的主机密钥，不再按首次信任固定。只适合你完全控制的环境。")
         }
     }
 
     @ViewBuilder
-    private var terminalSection: some View {
+    private var terminalPane: some View {
         @Bindable var model = model
-        Section {
-            Toggle("终端提示音", isOn: $model.settings.terminalBellEnabled)
-            Toggle("建议端口转发", isOn: $model.settings.suggestPortForward)
-            Toggle("保持会话活跃", isOn: $model.settings.terminalKeepAlive)
-            Stepper(value: $model.settings.terminalKeepAliveSeconds, in: 5...120) {
-                Text("心跳间隔：\(model.settings.terminalKeepAliveSeconds) 秒")
+        VStack(alignment: .leading, spacing: 26) {
+            SettingsGroup(title: "会话") {
+                SettingsToggleRow(title: "终端提示音", isOn: $model.settings.terminalBellEnabled)
+                SettingsHairline()
+                SettingsToggleRow(title: "建议端口转发", isOn: $model.settings.suggestPortForward)
             }
-            .disabled(!model.settings.terminalKeepAlive)
-            settingsRow("终端调试日志", systemImage: "doc.text") {
-                pages.append(.terminalLog)
+            SettingsGroup(
+                title: "心跳",
+                footer: "心跳相当于 ssh 的 ServerAliveInterval，用来撑过路由器和云防火墙的空闲超时。电脑休眠、切换网络或服务器重启还是会断。"
+            ) {
+                SettingsToggleRow(title: "保持会话活跃", isOn: $model.settings.terminalKeepAlive)
+                SettingsHairline()
+                SettingsLabeledRow(title: "心跳间隔") {
+                    Stepper(value: $model.settings.terminalKeepAliveSeconds, in: 5...120) {
+                        Text("\(model.settings.terminalKeepAliveSeconds) 秒")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                    .fixedSize()
+                }
+                .disabled(!model.settings.terminalKeepAlive)
             }
-        } header: {
-            Text("终端")
-        } footer: {
-            Text("心跳相当于 ssh 的 ServerAliveInterval，用来撑过路由器和云防火墙的空闲超时。电脑休眠、切换网络或服务器重启还是会断。")
-        }
-    }
-
-    @ViewBuilder
-    private var sftpSection: some View {
-        @Bindable var model = model
-        Section {
-            Toggle("保持会话活跃", isOn: $model.settings.sftpKeepAlive)
-            Stepper(value: $model.settings.sftpKeepAliveSeconds, in: 5...120) {
-                Text("心跳间隔：\(model.settings.sftpKeepAliveSeconds) 秒")
-            }
-            .disabled(!model.settings.sftpKeepAlive)
-            Picker("文本文件打开方式", selection: $model.settings.textFileOpener) {
-                ForEach(TextFileOpener.allCases) { opener in
-                    Text(opener.title).tag(opener)
+            SettingsGroup(title: "调试") {
+                SettingsChevronRow(title: "终端调试日志") {
+                    pages.append(.terminalLog)
                 }
             }
-            Button("管理快速查看缓存") {
-                clearCache()
-            }
-        } header: {
-            Text("SFTP")
-        } footer: {
-            Text("SFTP 同样会发心跳，避免闲置被中间设备掐掉。双击文本文件时，内置预览或系统默认应用按这里选择。")
         }
     }
 
     @ViewBuilder
-    private var loggingSection: some View {
+    private var sftpPane: some View {
         @Bindable var model = model
-        Section {
-            Toggle("记录应用日志", isOn: $model.settings.appLoggingEnabled)
-            settingsRow("查看日志", systemImage: "doc.text") {
-                pages.append(.appLog)
+        VStack(alignment: .leading, spacing: 26) {
+            SettingsGroup(
+                title: "会话",
+                footer: "SFTP 同样会发心跳，避免闲置被中间设备掐掉。"
+            ) {
+                SettingsToggleRow(title: "保持会话活跃", isOn: $model.settings.sftpKeepAlive)
+                SettingsHairline()
+                SettingsLabeledRow(title: "心跳间隔") {
+                    Stepper(value: $model.settings.sftpKeepAliveSeconds, in: 5...120) {
+                        Text("\(model.settings.sftpKeepAliveSeconds) 秒")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                    .fixedSize()
+                }
+                .disabled(!model.settings.sftpKeepAlive)
             }
-            Button("在 Finder 中显示") {
-                model.logger.revealInFinder()
+            SettingsGroup(
+                title: "文件",
+                footer: "双击文本文件时，内置预览或系统默认应用按这里选择。"
+            ) {
+                SettingsLabeledRow(title: "文本文件打开方式") {
+                    Picker("文本文件打开方式", selection: $model.settings.textFileOpener) {
+                        ForEach(TextFileOpener.allCases) { opener in
+                            Text(opener.title).tag(opener)
+                        }
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                }
+                SettingsHairline()
+                SettingsActionRow(title: "管理快速查看缓存") {
+                    clearCache()
+                }
             }
-            Button("用默认应用打开文件") {
-                model.logger.openInEditor()
-            }
-        } header: {
-            Text("开发日志")
-        } footer: {
-            Text("开发期间默认打开。日志写在 ~/Library/Logs/Hostpane/hostpane.log，超过 5 MB 会轮转。密码和密钥内容不会写入。")
         }
     }
 
-    private func settingsRow(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack {
-                Label(title, systemImage: systemImage)
-                Spacer(minLength: 8)
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
+    @ViewBuilder
+    private var diagnosticsPane: some View {
+        @Bindable var model = model
+        SettingsGroup(
+            title: "应用日志",
+            footer: "开发期间默认打开。日志写在 ~/Library/Logs/Hostpane/hostpane.log，超过 5 MB 会轮转。密码和密钥内容不会写入。"
+        ) {
+            SettingsToggleRow(title: "记录应用日志", isOn: $model.settings.appLoggingEnabled)
+            SettingsHairline()
+            SettingsChevronRow(title: "查看日志") {
+                pages.append(.appLog)
             }
-            .contentShape(Rectangle())
+            SettingsHairline()
+            SettingsActionRow(title: "在 Finder 中显示") {
+                model.logger.revealInFinder()
+            }
+            SettingsHairline()
+            SettingsActionRow(title: "用默认应用打开文件") {
+                model.logger.openInEditor()
+            }
         }
-        .buttonStyle(.plain)
     }
 
     private func clearCache() {
@@ -359,6 +548,23 @@ struct SettingsView: View {
             cacheMessage = count == 0 ? "缓存是空的。" : "已删除 \(count) 项缓存。"
         } catch {
             cacheMessage = error.localizedDescription
+        }
+    }
+}
+
+private struct SettingsSidebarGlass: ViewModifier {
+    var active: Bool
+    var tinted: Bool
+
+    func body(content: Content) -> some View {
+        if active {
+            content.hostpaneGlass(
+                in: RoundedRectangle(cornerRadius: 8, style: .continuous),
+                interactive: true,
+                tint: tinted ? HostpaneTheme.accent : nil
+            )
+        } else {
+            content
         }
     }
 }
@@ -373,279 +579,6 @@ private struct HiddenWindowTitle: ViewModifier {
     }
 }
 
-/// Pins the settings title to the left of the title bar, next to the traffic lights.
-/// Matches the main window's unified toolbar chrome, measured on this OS.
-private let settingsTitlebarHeight: CGFloat = 66
-private struct SettingsTitlebarLeading: NSViewRepresentable {
-    var title: String
-    var showsBack: Bool
-    var showsLogTools: Bool
-    var logChrome: LogPageChrome
-    var back: () -> Void
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator()
-    }
-
-    func makeNSView(context: Context) -> NSView {
-        NSView(frame: .zero)
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {
-        context.coordinator.title = title
-        context.coordinator.showsBack = showsBack
-        context.coordinator.showsLogTools = showsLogTools
-        context.coordinator.logChrome = logChrome
-        context.coordinator.back = back
-        let coordinator = context.coordinator
-        DispatchQueue.main.async {
-            coordinator.install(from: nsView)
-        }
-    }
-
-    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
-        coordinator.remove()
-    }
-
-    @MainActor
-    final class Coordinator: NSObject, NSSearchFieldDelegate {
-        var title = ""
-        var showsBack = false
-        var showsLogTools = false
-        var logChrome: LogPageChrome?
-        var back: () -> Void = {}
-        private weak var window: NSWindow?
-        private var accessory: NSTitlebarAccessoryViewController?
-        private var hostWidth: NSLayoutConstraint?
-        private var hostHeight: NSLayoutConstraint?
-
-        private let backButton = NSButton()
-        private let label = NSTextField(labelWithString: "")
-        private let toolWell = NSView()
-        private let toolStack = NSStackView()
-        private let refreshButton = NSButton()
-        private let copyButton = NSButton()
-        private let trashButton = NSButton()
-        private let searchField = NSSearchField()
-        private let stack = NSStackView()
-
-        override init() {
-            super.init()
-            backButton.bezelStyle = .circular
-            backButton.controlSize = .large
-            backButton.image = NSImage(systemSymbolName: "chevron.backward", accessibilityDescription: "返回")?
-                .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 14, weight: .semibold))
-            backButton.imageScaling = .scaleProportionallyDown
-            backButton.target = self
-            backButton.action = #selector(goBack)
-            backButton.toolTip = "返回"
-            backButton.translatesAutoresizingMaskIntoConstraints = false
-            NSLayoutConstraint.activate([
-                backButton.widthAnchor.constraint(equalToConstant: 32),
-                backButton.heightAnchor.constraint(equalToConstant: 32)
-            ])
-            label.font = .systemFont(ofSize: 17, weight: .semibold)
-            label.textColor = .labelColor
-            label.lineBreakMode = .byTruncatingTail
-            label.setContentHuggingPriority(.required, for: .horizontal)
-            configureTool(refreshButton, symbol: "arrow.clockwise", tip: "刷新", action: #selector(reloadLog))
-            configureTool(copyButton, symbol: "doc.on.doc", tip: "复制", action: #selector(copyLog))
-            configureTool(trashButton, symbol: "trash", tip: "清除", action: #selector(clearLog))
-            toolStack.orientation = .horizontal
-            toolStack.alignment = .centerY
-            toolStack.spacing = 2
-            toolStack.edgeInsets = NSEdgeInsets(top: 2, left: 6, bottom: 2, right: 6)
-            toolWell.wantsLayer = true
-            toolWell.layer?.cornerRadius = 18
-            toolStack.translatesAutoresizingMaskIntoConstraints = false
-            toolWell.addSubview(toolStack)
-            NSLayoutConstraint.activate([
-                toolStack.leadingAnchor.constraint(equalTo: toolWell.leadingAnchor),
-                toolStack.trailingAnchor.constraint(equalTo: toolWell.trailingAnchor),
-                toolStack.topAnchor.constraint(equalTo: toolWell.topAnchor),
-                toolStack.bottomAnchor.constraint(equalTo: toolWell.bottomAnchor),
-                toolWell.heightAnchor.constraint(equalToConstant: 36)
-            ])
-            searchField.placeholderString = "搜索日志"
-            searchField.delegate = self
-            searchField.target = self
-            searchField.action = #selector(searchChanged)
-            searchField.sendsSearchStringImmediately = true
-            searchField.translatesAutoresizingMaskIntoConstraints = false
-            searchField.widthAnchor.constraint(equalToConstant: 220).isActive = true
-            searchField.controlSize = .large
-            stack.orientation = .horizontal
-            stack.alignment = .centerY
-            stack.spacing = 10
-        }
-
-        private func configureTool(_ button: NSButton, symbol: String, tip: String, action: Selector) {
-            button.isBordered = false
-            button.bezelStyle = .shadowlessSquare
-            button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: tip)?
-                .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 15, weight: .regular))
-            button.imageScaling = .scaleProportionallyDown
-            button.imagePosition = .imageOnly
-            button.toolTip = tip
-            button.target = self
-            button.action = action
-            button.translatesAutoresizingMaskIntoConstraints = false
-            NSLayoutConstraint.activate([
-                button.widthAnchor.constraint(equalToConstant: 32),
-                button.heightAnchor.constraint(equalToConstant: 30)
-            ])
-        }
-
-        func install(from anchor: NSView) {
-            guard let window = anchor.window else { return }
-            if self.window !== window || accessory == nil {
-                remove()
-                if window.toolbar == nil {
-                    let toolbar = NSToolbar(identifier: "hostpane.settings")
-                    toolbar.displayMode = .iconOnly
-                    window.toolbar = toolbar
-                }
-                window.toolbarStyle = .unified
-                window.layoutIfNeeded()
-                let chrome = titlebarHeight(of: window)
-                let host = NSView(frame: NSRect(x: 0, y: 0, width: 240, height: chrome))
-                host.setContentHuggingPriority(.required, for: .horizontal)
-                stack.translatesAutoresizingMaskIntoConstraints = false
-                stack.setHuggingPriority(.required, for: .horizontal)
-                host.addSubview(stack)
-                let width = host.widthAnchor.constraint(equalToConstant: 240)
-                let height = host.heightAnchor.constraint(equalToConstant: chrome)
-                hostWidth = width
-                hostHeight = height
-                NSLayoutConstraint.activate([
-                    height,
-                    width,
-                    stack.leadingAnchor.constraint(equalTo: host.leadingAnchor, constant: 6),
-                    stack.centerYAnchor.constraint(equalTo: host.centerYAnchor)
-                ])
-                let controller = NSTitlebarAccessoryViewController()
-                controller.layoutAttribute = .left
-                controller.view = host
-                window.addTitlebarAccessoryViewController(controller)
-                accessory = controller
-                self.window = window
-            }
-            apply()
-        }
-
-        private func tintToolButtons() {
-            let appearance = window?.effectiveAppearance ?? NSApp.effectiveAppearance
-            appearance.performAsCurrentDrawingAppearance {
-                let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-                let tint: NSColor = dark ? .white : .labelColor
-                let symbol = NSImage.SymbolConfiguration(pointSize: 15, weight: .regular)
-                    .applying(NSImage.SymbolConfiguration(paletteColors: [tint]))
-                let names = ["arrow.clockwise", "doc.on.doc", "trash"]
-                for (button, name) in zip([refreshButton, copyButton, trashButton], names) {
-                    button.image = NSImage(systemSymbolName: name, accessibilityDescription: button.toolTip)?
-                        .withSymbolConfiguration(symbol)
-                    button.contentTintColor = tint
-                }
-                let fill = dark
-                    ? NSColor.white.withAlphaComponent(0.14)
-                    : NSColor.black.withAlphaComponent(0.06)
-                toolWell.layer?.backgroundColor = fill.cgColor
-                toolWell.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(dark ? 0.35 : 0.4).cgColor
-            }
-        }
-
-        private func titlebarHeight(of window: NSWindow) -> CGFloat {
-            let chrome = window.frame.height - window.contentLayoutRect.maxY
-            if chrome >= 44 { return chrome }
-            return settingsTitlebarHeight
-        }
-
-        func remove() {
-            guard let window, let accessory else { return }
-            if let index = window.titlebarAccessoryViewControllers.firstIndex(where: { $0 === accessory }) {
-                window.removeTitlebarAccessoryViewController(at: index)
-            }
-            self.accessory = nil
-            self.window = nil
-        }
-
-        private func apply() {
-            label.stringValue = title
-            backButton.isHidden = !showsBack
-            copyButton.isEnabled = logChrome?.canCopy ?? false
-            trashButton.isEnabled = logChrome?.canClear ?? false
-            if searchField.stringValue != logChrome?.query {
-                searchField.stringValue = logChrome?.query ?? ""
-            }
-            let tools = [refreshButton, copyButton, trashButton]
-            let toolMatches = toolStack.arrangedSubviews.count == tools.count
-                && zip(toolStack.arrangedSubviews, tools).allSatisfy { $0 === $1 }
-            if !toolMatches {
-                toolStack.arrangedSubviews.forEach {
-                    toolStack.removeArrangedSubview($0)
-                    $0.removeFromSuperview()
-                }
-                tools.forEach { toolStack.addArrangedSubview($0) }
-            }
-            var views: [NSView] = showsBack ? [backButton, label] : [label]
-            if showsLogTools {
-                views.append(contentsOf: [toolWell, searchField])
-            }
-            let current = stack.arrangedSubviews
-            let matches = current.count == views.count && zip(current, views).allSatisfy { $0 === $1 }
-            if !matches {
-                current.forEach {
-                    stack.removeArrangedSubview($0)
-                    $0.removeFromSuperview()
-                }
-                views.forEach { stack.addArrangedSubview($0) }
-            }
-            tintToolButtons()
-            if stack.arrangedSubviews.contains(where: { $0 === label }) {
-                stack.setCustomSpacing(22, after: label)
-            }
-            if stack.arrangedSubviews.contains(where: { $0 === toolWell }) {
-                stack.setCustomSpacing(10, after: toolWell)
-            }
-            let fitted = ceil(stack.fittingSize.width + 12)
-            hostWidth?.constant = max(180, fitted)
-            if let window {
-                let chrome = titlebarHeight(of: window)
-                hostHeight?.constant = chrome
-            }
-            if var frame = accessory?.view.frame {
-                frame.size.width = hostWidth?.constant ?? fitted
-                frame.size.height = hostHeight?.constant ?? settingsTitlebarHeight
-                accessory?.view.frame = frame
-            }
-        }
-
-        @objc private func goBack() {
-            back()
-        }
-
-        @objc private func reloadLog() {
-            logChrome?.performReload()
-        }
-
-        @objc private func copyLog() {
-            logChrome?.performCopy()
-        }
-
-        @objc private func clearLog() {
-            logChrome?.requestClear()
-        }
-
-        @objc private func searchChanged() {
-            logChrome?.query = searchField.stringValue
-        }
-
-        func controlTextDidChange(_ notification: Notification) {
-            guard notification.object as? NSSearchField === searchField else { return }
-            logChrome?.query = searchField.stringValue
-        }
-    }
-}
 
 struct TerminalDebugLogView: View {
     @Environment(AppModel.self) private var model

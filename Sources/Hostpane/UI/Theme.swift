@@ -72,6 +72,72 @@ enum HostpaneTheme {
     static let sidebarWidth: CGFloat = 232
 }
 
+enum HostpaneGlass {
+    @available(macOS 26.0, *)
+    static func make(interactive: Bool, tint: Color?) -> Glass {
+        let base: Glass = interactive ? .regular.interactive() : .regular
+        guard let tint else { return base }
+        return base.tint(tint)
+    }
+}
+
+extension View {
+    /// Liquid glass on macOS 26 and later. Older systems get a material fill.
+    @ViewBuilder
+    func hostpaneGlass<S: Shape>(
+        in shape: S,
+        interactive: Bool = false,
+        tint: Color? = nil
+    ) -> some View {
+        if #available(macOS 26.0, *) {
+            self.glassEffect(HostpaneGlass.make(interactive: interactive, tint: tint), in: shape)
+        } else {
+            self.background(.regularMaterial, in: shape)
+        }
+    }
+
+    func hostpaneGlassCard(
+        cornerRadius: CGFloat,
+        interactive: Bool = false,
+        tint: Color? = nil
+    ) -> some View {
+        hostpaneGlass(
+            in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous),
+            interactive: interactive,
+            tint: tint
+        )
+    }
+
+    /// Lets the page background draw under the sidebar and softens the top scroll edge.
+    @ViewBuilder
+    func hostpaneExtendsUnderSidebar() -> some View {
+        if #available(macOS 26.0, *) {
+            self.backgroundExtensionEffect()
+                .scrollEdgeEffectStyle(.soft, for: .top)
+        } else {
+            self
+        }
+    }
+}
+
+struct HostpaneGlassGroup<Content: View>: View {
+    var spacing: CGFloat
+    @ViewBuilder var content: () -> Content
+
+    init(spacing: CGFloat = 16, @ViewBuilder content: @escaping () -> Content) {
+        self.spacing = spacing
+        self.content = content
+    }
+
+    var body: some View {
+        if #available(macOS 26.0, *) {
+            GlassEffectContainer(spacing: spacing, content: content)
+        } else {
+            content()
+        }
+    }
+}
+
 private struct ReduceStatusMotionKey: EnvironmentKey {
     static let defaultValue = false
 }

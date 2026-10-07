@@ -64,6 +64,8 @@ struct HostProfileView: View {
                     profileRow("主机", host.hostname)
                     Divider().opacity(0.5)
                     profileRow("端口", "\(host.port)")
+                    Divider().opacity(0.5)
+                    profileRow("经由", model.effectiveProxyJump(for: host) ?? "直连")
                 }
                 profileSection(title: "认证", systemImage: "lock.circle") {
                     profileRow("用户名", host.username)
@@ -120,10 +122,7 @@ struct HostProfileView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 4)
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color(nsColor: .windowBackgroundColor))
-            )
+            .hostpaneGlassCard(cornerRadius: 14)
         }
     }
 
@@ -150,10 +149,7 @@ struct HostProfileView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
-        )
+        .hostpaneGlassCard(cornerRadius: 14)
     }
 
     private var deleteRow: some View {
@@ -163,10 +159,7 @@ struct HostProfileView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
-        )
+        .hostpaneGlassCard(cornerRadius: 14)
     }
 
     private func pill(_ title: String, destructive: Bool = false, action: @escaping () -> Void) -> some View {

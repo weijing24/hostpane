@@ -105,10 +105,7 @@ private struct DockerHostCard: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .topLeading)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
-        )
+        .hostpaneGlassCard(cornerRadius: 16)
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(hovering ? HostpaneTheme.accent.opacity(0.7) : Color.secondary.opacity(0.12), lineWidth: 1)
@@ -282,10 +279,7 @@ struct DockerConnectionInfoView: View {
             }
             .padding(22)
             .frame(maxWidth: 760)
-            .background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Color(nsColor: .windowBackgroundColor))
-            )
+            .hostpaneGlassCard(cornerRadius: 18)
             .padding(28)
             .frame(maxWidth: .infinity)
         }

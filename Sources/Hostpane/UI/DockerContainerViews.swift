@@ -184,10 +184,7 @@ private struct DockerContainerCard: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .topLeading)
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color(nsColor: .windowBackgroundColor))
-            )
+            .hostpaneGlassCard(cornerRadius: 16)
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .stroke(hovering ? HostpaneTheme.docker.opacity(0.45) : Color.secondary.opacity(0.12), lineWidth: 1)
@@ -273,10 +270,7 @@ struct DockerContainerDetailView: View {
                 infoRow("命令", item.command.isEmpty ? "—" : item.command, monospaced: true)
                 infoRow("重启策略", item.restartPolicy.isEmpty ? "—" : item.restartPolicy)
             }
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color(nsColor: .windowBackgroundColor))
-            )
+            .hostpaneGlassCard(cornerRadius: 14)
         }
     }
 
@@ -335,10 +329,7 @@ struct DockerContainerDetailView: View {
                 .font(.caption)
             }
             .padding(16)
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color(nsColor: .windowBackgroundColor))
-            )
+            .hostpaneGlassCard(cornerRadius: 14)
         }
     }
 
@@ -359,10 +350,7 @@ struct DockerContainerDetailView: View {
                     .foregroundStyle(item.isHealthy ? HostpaneTheme.online : HostpaneTheme.loadMedium)
             }
             .padding(14)
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color(nsColor: .windowBackgroundColor))
-            )
+            .hostpaneGlassCard(cornerRadius: 14)
         }
     }
 
@@ -376,10 +364,7 @@ struct DockerContainerDetailView: View {
                 Spacer()
             }
             .padding(14)
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color(nsColor: .windowBackgroundColor))
-            )
+            .hostpaneGlassCard(cornerRadius: 14)
         }
     }
 
@@ -392,10 +377,7 @@ struct DockerContainerDetailView: View {
                     .foregroundStyle(.secondary)
                     .padding(14)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .fill(Color(nsColor: .windowBackgroundColor))
-                    )
+                    .hostpaneGlassCard(cornerRadius: 14)
             } else {
                 VStack(spacing: 0) {
                     ForEach(item.mounts) { mount in
@@ -429,10 +411,7 @@ struct DockerContainerDetailView: View {
                         }
                     }
                 }
-                .background(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(Color(nsColor: .windowBackgroundColor))
-                )
+                .hostpaneGlassCard(cornerRadius: 14)
             }
         }
     }
@@ -454,10 +433,7 @@ struct DockerContainerDetailView: View {
                 Text("\(item.env.count) 个变量")
             }
             .padding(14)
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color(nsColor: .windowBackgroundColor))
-            )
+            .hostpaneGlassCard(cornerRadius: 14)
         }
     }
 
@@ -476,10 +452,7 @@ struct DockerContainerDetailView: View {
                     Task { await model.dockerAction(host, "rm -f", name: item.name) }
                 }
             }
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color(nsColor: .windowBackgroundColor))
-            )
+            .hostpaneGlassCard(cornerRadius: 14)
         }
     }
 
@@ -492,10 +465,7 @@ struct DockerContainerDetailView: View {
                 detailRow("进程", "list.bullet", .processes)
                 detailRow("检查", "eye", .inspect)
             }
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color(nsColor: .windowBackgroundColor))
-            )
+            .hostpaneGlassCard(cornerRadius: 14)
         }
     }
 

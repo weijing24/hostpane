@@ -43,6 +43,8 @@ public struct HostRecord: Identifiable, Codable, Hashable, Sendable {
     public var hideAddress: Bool
     public var defaultInterface: String?
     public var defaultMount: String?
+    /// OpenSSH `ProxyJump` chain. `none` forces a direct connection.
+    public var proxyJump: String?
 
     public init(
         id: UUID = UUID(),
@@ -62,7 +64,8 @@ public struct HostRecord: Identifiable, Codable, Hashable, Sendable {
         sshKeyFingerprint: String? = nil,
         hideAddress: Bool = false,
         defaultInterface: String? = nil,
-        defaultMount: String? = nil
+        defaultMount: String? = nil,
+        proxyJump: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -82,6 +85,7 @@ public struct HostRecord: Identifiable, Codable, Hashable, Sendable {
         self.hideAddress = hideAddress
         self.defaultInterface = Self.normalizedGroup(defaultInterface)
         self.defaultMount = Self.normalizedGroup(defaultMount)
+        self.proxyJump = Self.normalizedProxyJump(proxyJump)
     }
 
     public init(from decoder: Decoder) throws {
@@ -108,6 +112,7 @@ public struct HostRecord: Identifiable, Codable, Hashable, Sendable {
         hideAddress = try container.decodeIfPresent(Bool.self, forKey: .hideAddress) ?? false
         defaultInterface = Self.normalizedGroup(try container.decodeIfPresent(String.self, forKey: .defaultInterface))
         defaultMount = Self.normalizedGroup(try container.decodeIfPresent(String.self, forKey: .defaultMount))
+        proxyJump = Self.normalizedProxyJump(try container.decodeIfPresent(String.self, forKey: .proxyJump))
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -130,6 +135,7 @@ public struct HostRecord: Identifiable, Codable, Hashable, Sendable {
         try container.encode(hideAddress, forKey: .hideAddress)
         try container.encodeIfPresent(defaultInterface, forKey: .defaultInterface)
         try container.encodeIfPresent(defaultMount, forKey: .defaultMount)
+        try container.encodeIfPresent(proxyJump, forKey: .proxyJump)
     }
 
     public var displayName: String {
@@ -173,6 +179,17 @@ public struct HostRecord: Identifiable, Codable, Hashable, Sendable {
         return trimmed.isEmpty ? nil : trimmed
     }
 
+    public static func normalizedProxyJump(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// `ProxyJump none` disables the jump, including one inherited from `~/.ssh/config`.
+    public var suppressesProxyJump: Bool {
+        proxyJump?.caseInsensitiveCompare("none") == .orderedSame
+    }
+
     private enum CodingKeys: String, CodingKey {
         case id
         case name
@@ -192,5 +209,6 @@ public struct HostRecord: Identifiable, Codable, Hashable, Sendable {
         case hideAddress
         case defaultInterface
         case defaultMount
+        case proxyJump
     }
 }
