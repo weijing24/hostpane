@@ -8,8 +8,8 @@ on:
       bump:
         description: Semver component to increment
         type: choice
-        options: [patch, minor, major]
-        default: patch
+        options: [minor, patch, major]
+        default: minor
 
 concurrency:
   group: release-dmg
@@ -50,7 +50,10 @@ jobs:
           set -euo pipefail
           git fetch --tags --force
           last="$(git tag -l 'v[0-9]*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true)"
-          bump="${{ github.event.inputs.bump || 'patch' }}"
+          # Beszel's release line is the middle number (0.18.0, 0.19.0, 0.20.0).
+          # A main push starts the next line. Patch is a follow-up on that line
+          # and is not capped at 9 (Beszel shipped 0.12.10). Major is manual.
+          bump="${{ github.event.inputs.bump || 'minor' }}"
           plist="Sources/Hostpane/Resources/Info.plist"
           if [ -z "$last" ]; then
             ver="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")"

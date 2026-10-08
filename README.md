@@ -105,7 +105,7 @@ Debug without bundling:
 
 ## Disk image
 
-Every push to `main` cuts a new GitHub Release (`v0.1.0`, `v0.1.1`, …) with an Apple Silicon DMG and a What's Changed list from commits since the previous tag. Use **Actions → Release DMG → Run workflow** to bump minor or major instead of patch.
+Every push to `main` cuts a new GitHub Release on the next minor line (`v1.0.7`, then `v1.1.0`, `v1.2.0`, …). The minor number keeps growing past 9 (`v1.9.0`, then `v1.10.0`). Use **Actions → Release DMG → Run workflow** and choose `patch` for a follow-up on the current line (`v1.1.1`, `v1.1.2`, …, including past 9) or `major` for `v2.0.0`.
 
 ```bash
 ./scripts/package-dmg.sh
