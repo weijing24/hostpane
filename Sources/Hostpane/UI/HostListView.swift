@@ -30,8 +30,8 @@ struct SidebarView: View {
 
             Section("终端") {
                 if model.activeSessions.isEmpty {
-                    Label("无会话", systemImage: "rectangle.dashed")
-                        .foregroundStyle(.secondary)
+                    Label("终端", systemImage: "terminal")
+                        .badge("0")
                         .tag(SidebarItem.terminalHome)
                 } else {
                     ForEach(model.activeSessions) { host in
@@ -46,8 +46,8 @@ struct SidebarView: View {
 
             Section("SFTP") {
                 if model.activeSFTPSessions.isEmpty {
-                    Label("无会话", systemImage: "folder")
-                        .foregroundStyle(.secondary)
+                    Label("SFTP", systemImage: "folder")
+                        .badge("0")
                         .tag(SidebarItem.sftpHome)
                 } else {
                     ForEach(model.activeSFTPSessions) { host in

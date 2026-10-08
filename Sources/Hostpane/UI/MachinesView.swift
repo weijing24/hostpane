@@ -14,29 +14,16 @@ struct MachinesView: View {
         @Bindable var model = model
         NavigationStack {
         ScrollView {
-            HostpaneGlassGroup(spacing: 16) {
             VStack(alignment: .leading, spacing: 16) {
                 if model.settings.showTagFilter {
-                    HStack {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                filterChip("全部", selected: model.machineFilter == .all) {
-                                    model.machineFilter = .all
-                                }
-                                filterChip("无标签", selected: model.machineFilter == .untagged) {
-                                    model.machineFilter = .untagged
-                                }
-                                ForEach(model.knownTags, id: \.self) { tag in
-                                    filterChip(tag, selected: model.machineFilter == .tag(tag)) {
-                                        model.machineFilter = .tag(tag)
-                                    }
-                                }
-                            }
-                        }
-                        Spacer(minLength: 0)
-                    }
+                    TagFilterBar(
+                        tags: model.knownTags,
+                        note: filterNote,
+                        isSelected: { model.machineFilter == $0 },
+                        onSelect: { model.machineFilter = $0 }
+                    )
                 }
-
+                HostpaneGlassGroup(spacing: 4) {
                 if model.hosts.isEmpty {
                     ContentUnavailableView {
                         Label("还没有机器", systemImage: "server.rack")
@@ -72,8 +59,8 @@ struct MachinesView: View {
                     }
                 }
             }
-            .padding(24)
             }
+            .padding(24)
         }
         .background(HostpaneTheme.page)
         .hostpaneExtendsUnderSidebar()
@@ -148,20 +135,11 @@ struct MachinesView: View {
         }
     }
 
-    private func filterChip(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(.caption.weight(selected ? .semibold : .regular))
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .hostpaneGlass(
-                    in: Capsule(),
-                    interactive: true,
-                    tint: selected ? HostpaneTheme.accent : nil
-                )
-                .foregroundStyle(selected ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
-        }
-        .buttonStyle(.plain)
+    private var filterNote: String? {
+        let narrowed = model.machineFilter != .all
+            || !model.machineSearch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard narrowed else { return nil }
+        return "当前 \(model.filteredHosts.count) 台 · 全部 \(model.hosts.count) 台"
     }
 }
 
@@ -193,7 +171,7 @@ private struct MachineCard: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 if let group = host.group, !group.isEmpty {
-                    Text(group)
+                    Text("组 \(group)")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -210,7 +188,7 @@ private struct MachineCard: View {
                 }
             }
             Spacer(minLength: 8)
-            if hovering, !batchEditing {
+            if !batchEditing {
                 HStack(spacing: 8) {
                     CircleActionButton.terminal { model.openTerminal(host) }
                     CircleActionButton.sftp { model.openSFTP(host) }

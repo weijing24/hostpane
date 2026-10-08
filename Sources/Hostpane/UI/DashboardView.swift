@@ -15,13 +15,20 @@ struct DashboardView: View {
                 dark: model.settings.dashboardBackgroundDark,
                 isDark: useDarkBackground
             ) {
-                HostpaneGlassGroup(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 16) {
-                        if model.settings.showTagFilter {
-                            filterRow
+                VStack(alignment: .leading, spacing: 16) {
+                    if model.settings.showTagFilter {
+                        TagFilterBar(
+                            tags: model.knownTags,
+                            note: filterNote,
+                            isSelected: { model.dashboardFilter == $0 },
+                            onSelect: { model.dashboardFilter = $0 }
+                        )
+                    }
+                    HostpaneGlassGroup(spacing: 4) {
+                        VStack(alignment: .leading, spacing: 16) {
+                            summaryRow
+                            hostGrid
                         }
-                        summaryRow
-                        hostGrid
                     }
                 }
             }
@@ -79,22 +86,11 @@ struct DashboardView: View {
         }
     }
 
-    private var filterRow: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                filterChip("全部", selected: model.dashboardFilter == .all) {
-                    model.dashboardFilter = .all
-                }
-                filterChip("无标签", selected: model.dashboardFilter == .untagged) {
-                    model.dashboardFilter = .untagged
-                }
-                ForEach(model.knownTags, id: \.self) { tag in
-                    filterChip(tag, selected: model.dashboardFilter == .tag(tag)) {
-                        model.dashboardFilter = .tag(tag)
-                    }
-                }
-            }
-        }
+    private var filterNote: String? {
+        let narrowed = model.dashboardFilter != .all
+            || !model.dashboardSearch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard narrowed else { return nil }
+        return "当前 \(model.dashboardHosts.count) 台 · 仪表板 \(model.dashboardSortableHosts.count) 台"
     }
 
     private var summaryRow: some View {
@@ -160,21 +156,6 @@ struct DashboardView: View {
         }
     }
 
-    private func filterChip(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(.caption.weight(selected ? .semibold : .regular))
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .hostpaneGlass(
-                    in: Capsule(),
-                    interactive: true,
-                    tint: selected ? HostpaneTheme.accent : nil
-                )
-                .foregroundStyle(selected ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
-        }
-        .buttonStyle(.plain)
-    }
 }
 
 private struct DashboardSortSheet: View {
@@ -240,7 +221,7 @@ private struct SummaryStatCard: View {
     var dot: Color
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
             Text(title)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -253,7 +234,8 @@ private struct SummaryStatCard: View {
                     .monospacedDigit()
             }
         }
-        .padding(18)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .hostpaneGlassCard(cornerRadius: 16)
     }
@@ -303,11 +285,9 @@ private struct DashboardHostCard: View {
                 .font(.headline)
                 .lineLimit(1)
             Spacer(minLength: 8)
-            if hovering {
-                HStack(spacing: 8) {
-                    CircleActionButton.terminal { model.openTerminal(host) }
-                    CircleActionButton.sftp { model.openSFTP(host) }
-                }
+            HStack(spacing: 8) {
+                CircleActionButton.terminal { model.openTerminal(host) }
+                CircleActionButton.sftp { model.openSFTP(host) }
             }
             statusBadge
         }

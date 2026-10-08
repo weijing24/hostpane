@@ -619,7 +619,7 @@ final class AppModel {
             let command = "bash -s <<'\(marker)'\n\(snippet.body)\n\(marker)"
             do {
                 try await engine.connect(host: host, secrets: secrets, settings: settings, keepAlive: .terminal)
-                let result = try await engine.execute(command)
+                let result = try await executeSnippetCommand(command, on: engine)
                 let text = String(decoding: result.standardOutput, as: UTF8.self)
                 let errorText = String(decoding: result.standardError, as: UTF8.self)
                 let exit = result.exitStatus ?? 1
@@ -645,6 +645,22 @@ final class AppModel {
         snippetLibrary.runs.insert(run, at: 0)
         saveSnippets()
         return run
+    }
+
+    private func executeSnippetCommand(_ command: String, on engine: SSHEngine) async throws -> SSHExecResult {
+        let seconds = AppSettings.clampedSnippetSeconds(settings.snippetTimeoutSeconds)
+        return try await withThrowingTaskGroup(of: SSHExecResult.self) { group in
+            group.addTask { try await engine.execute(command) }
+            group.addTask {
+                try await Task.sleep(for: .seconds(seconds))
+                throw HostpaneSSHError.snippetTimedOut
+            }
+            defer { group.cancelAll() }
+            guard let result = try await group.next() else {
+                throw HostpaneSSHError.notConnected
+            }
+            return result
+        }
     }
 
     func persistSettings() {

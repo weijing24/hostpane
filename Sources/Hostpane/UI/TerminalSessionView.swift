@@ -6,7 +6,7 @@ struct TerminalHomeView: View {
         ContentUnavailableView {
             Label("无会话", systemImage: "terminal")
         } description: {
-            Text("在机器卡片上把指针移到机器上，点终端按钮即可连接。")
+            Text("在机器卡片上点终端按钮即可连接。")
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(HostpaneTheme.page)

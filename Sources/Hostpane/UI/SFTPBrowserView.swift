@@ -7,7 +7,7 @@ struct SFTPHomeView: View {
         ContentUnavailableView {
             Label("无会话", systemImage: "folder")
         } description: {
-            Text("在机器卡片上把指针移到机器上，点文件夹按钮即可打开 SFTP。")
+            Text("在机器卡片上点文件夹按钮即可打开 SFTP。")
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(HostpaneTheme.page)

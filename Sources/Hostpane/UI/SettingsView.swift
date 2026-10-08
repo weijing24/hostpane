@@ -427,18 +427,49 @@ struct SettingsView: View {
     @ViewBuilder
     private var connectionPane: some View {
         @Bindable var model = model
-        SettingsGroup(
-            title: "超时",
-            footer: "建立 SSH 连接时，超过这段时间还没连上就停止。"
-        ) {
-            SettingsLabeledRow(title: "连接超时") {
-                Stepper(value: $model.settings.connectionTimeoutSeconds, in: 5...120) {
-                    Text("\(model.settings.connectionTimeoutSeconds) 秒")
-                        .font(.system(size: 14))
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
+        VStack(alignment: .leading, spacing: 26) {
+            SettingsGroup(
+                title: "超时",
+                footer: "连接超时管的是 SSH 握手。代码片段超时管的是远程命令跑完之前的等待。"
+            ) {
+                SettingsSecondsRow(
+                    title: "连接超时",
+                    seconds: $model.settings.connectionTimeoutSeconds,
+                    range: 5...120
+                )
+                SettingsHairline()
+                SettingsSecondsRow(
+                    title: "代码片段执行超时",
+                    seconds: $model.settings.snippetTimeoutSeconds,
+                    range: 5...600
+                )
+            }
+            SettingsGroup(
+                title: "保持连接",
+                footer: "心跳相当于 ssh 的 ServerAliveInterval，用来撑过路由器和云防火墙的空闲超时。电脑休眠、切换网络或服务器重启还是会断。"
+            ) {
+                SettingsToggleRow(title: "终端会话", isOn: $model.settings.terminalKeepAlive)
+                SettingsHairline()
+                SettingsSecondsRow(
+                    title: "心跳间隔",
+                    seconds: $model.settings.terminalKeepAliveSeconds,
+                    range: 5...120
+                )
+                .disabled(!model.settings.terminalKeepAlive)
+                SettingsHairline()
+                SettingsToggleRow(title: "SFTP 会话", isOn: $model.settings.sftpKeepAlive)
+                SettingsHairline()
+                SettingsSecondsRow(
+                    title: "心跳间隔",
+                    seconds: $model.settings.sftpKeepAliveSeconds,
+                    range: 5...120
+                )
+                .disabled(!model.settings.sftpKeepAlive)
+            }
+            SettingsGroup(title: "相关设置") {
+                SettingsLinkButtonRow(title: "主机密钥", buttonTitle: "安全性") {
+                    tab = .security
                 }
-                .fixedSize()
             }
         }
     }
@@ -452,23 +483,6 @@ struct SettingsView: View {
                 SettingsHairline()
                 SettingsToggleRow(title: "建议端口转发", isOn: $model.settings.suggestPortForward)
             }
-            SettingsGroup(
-                title: "心跳",
-                footer: "心跳相当于 ssh 的 ServerAliveInterval，用来撑过路由器和云防火墙的空闲超时。电脑休眠、切换网络或服务器重启还是会断。"
-            ) {
-                SettingsToggleRow(title: "保持会话活跃", isOn: $model.settings.terminalKeepAlive)
-                SettingsHairline()
-                SettingsLabeledRow(title: "心跳间隔") {
-                    Stepper(value: $model.settings.terminalKeepAliveSeconds, in: 5...120) {
-                        Text("\(model.settings.terminalKeepAliveSeconds) 秒")
-                            .font(.system(size: 14))
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
-                    }
-                    .fixedSize()
-                }
-                .disabled(!model.settings.terminalKeepAlive)
-            }
             SettingsGroup(title: "调试") {
                 SettingsChevronRow(title: "终端调试日志") {
                     pages.append(.terminalLog)
@@ -481,23 +495,6 @@ struct SettingsView: View {
     private var sftpPane: some View {
         @Bindable var model = model
         VStack(alignment: .leading, spacing: 26) {
-            SettingsGroup(
-                title: "会话",
-                footer: "SFTP 同样会发心跳，避免闲置被中间设备掐掉。"
-            ) {
-                SettingsToggleRow(title: "保持会话活跃", isOn: $model.settings.sftpKeepAlive)
-                SettingsHairline()
-                SettingsLabeledRow(title: "心跳间隔") {
-                    Stepper(value: $model.settings.sftpKeepAliveSeconds, in: 5...120) {
-                        Text("\(model.settings.sftpKeepAliveSeconds) 秒")
-                            .font(.system(size: 14))
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
-                    }
-                    .fixedSize()
-                }
-                .disabled(!model.settings.sftpKeepAlive)
-            }
             SettingsGroup(
                 title: "文件",
                 footer: "双击文本文件时，内置预览或系统默认应用按这里选择。"

@@ -98,6 +98,7 @@ public enum TerminalScrollbar: String, Codable, CaseIterable, Sendable, Identifi
 
 public struct AppSettings: Codable, Equatable, Sendable {
     public var connectionTimeoutSeconds: Int
+    public var snippetTimeoutSeconds: Int
     public var alwaysTrustHostKeys: Bool
     public var terminalBellEnabled: Bool
     public var suggestPortForward: Bool
@@ -132,6 +133,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
 
     public init(
         connectionTimeoutSeconds: Int = 15,
+        snippetTimeoutSeconds: Int = 15,
         alwaysTrustHostKeys: Bool = false,
         terminalBellEnabled: Bool = true,
         suggestPortForward: Bool = false,
@@ -163,6 +165,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         statusLayout: StatusDetailLayout = .default
     ) {
         self.connectionTimeoutSeconds = connectionTimeoutSeconds
+        self.snippetTimeoutSeconds = snippetTimeoutSeconds
         self.alwaysTrustHostKeys = alwaysTrustHostKeys
         self.terminalBellEnabled = terminalBellEnabled
         self.suggestPortForward = suggestPortForward
@@ -198,6 +201,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         connectionTimeoutSeconds = try container.decodeIfPresent(Int.self, forKey: .connectionTimeoutSeconds) ?? 15
+        snippetTimeoutSeconds = try container.decodeIfPresent(Int.self, forKey: .snippetTimeoutSeconds) ?? 15
         alwaysTrustHostKeys = try container.decodeIfPresent(Bool.self, forKey: .alwaysTrustHostKeys) ?? false
         terminalBellEnabled = try container.decodeIfPresent(Bool.self, forKey: .terminalBellEnabled) ?? true
         suggestPortForward = try container.decodeIfPresent(Bool.self, forKey: .suggestPortForward) ?? false
@@ -232,6 +236,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
 
     public mutating func clamp() {
         connectionTimeoutSeconds = Self.clampedSeconds(connectionTimeoutSeconds)
+        snippetTimeoutSeconds = Self.clampedSnippetSeconds(snippetTimeoutSeconds)
         terminalKeepAliveSeconds = Self.clampedSeconds(terminalKeepAliveSeconds)
         sftpKeepAliveSeconds = Self.clampedSeconds(sftpKeepAliveSeconds)
         terminalFontSize = min(max(terminalFontSize, 9), 22)
@@ -251,12 +256,18 @@ public struct AppSettings: Codable, Equatable, Sendable {
         min(max(value, 5), 120)
     }
 
+    /// Snippet runs can outlast a handshake, so the ceiling is higher than a connection timeout.
+    public static func clampedSnippetSeconds(_ value: Int) -> Int {
+        min(max(value, 5), 600)
+    }
+
     public static func clampedStatusRefresh(_ value: Int) -> Int {
         statusRefreshChoices.min { abs($0 - value) < abs($1 - value) } ?? 5
     }
 
     private enum CodingKeys: String, CodingKey {
         case connectionTimeoutSeconds
+        case snippetTimeoutSeconds
         case alwaysTrustHostKeys
         case terminalBellEnabled
         case suggestPortForward

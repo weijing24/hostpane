@@ -572,6 +572,7 @@ func latencyWindowChecks() throws {
 func settingsCodableChecks() throws {
     let empty = try JSONDecoder().decode(AppSettings.self, from: Data("{}".utf8))
     try expect(empty.connectionTimeoutSeconds == 15, "timeout default")
+    try expect(empty.snippetTimeoutSeconds == 15, "snippet timeout default")
     try expect(empty.alwaysTrustHostKeys == false, "trust default")
     try expect(empty.terminalBellEnabled, "bell default")
     try expect(empty.terminalKeepAlive, "keepalive default")
@@ -605,6 +606,7 @@ func settingsCodableChecks() throws {
     try expect(loaded.suggestPortForward, "forward roundtrip")
     try expect(loaded.textFileOpener == .defaultApp, "opener roundtrip")
     try expect(loaded.sftpKeepAlive, "sftp keepalive roundtrip")
+    try expect(loaded.snippetTimeoutSeconds == 15, "snippet timeout roundtrip")
     try expect(loaded.appearance == .dark, "appearance roundtrip")
 
     let first = UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!

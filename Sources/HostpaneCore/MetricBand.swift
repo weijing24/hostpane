@@ -5,10 +5,10 @@ public enum MetricBand: Equatable, Sendable {
     case medium
     case high
 
-    /// SSH round-trip: LAN and nearby are low, trans-Pacific typically medium.
+    /// SSH round-trip: LAN is low, trans-Pacific (about 200–300 ms) stays medium.
     public static func latency(_ seconds: Double) -> MetricBand {
         if seconds < 0.08 { return .low }
-        if seconds < 0.20 { return .medium }
+        if seconds < 0.35 { return .medium }
         return .high
     }
 

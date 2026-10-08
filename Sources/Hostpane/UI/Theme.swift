@@ -120,6 +120,57 @@ extension View {
     }
 }
 
+/// Tag chips sit in their own glass group. The page group must not own them:
+/// `GlassEffectContainer` merges effects closer than `spacing`, and a merged
+/// capsule draws a second lens over the next chip.
+struct TagFilterBar: View {
+    var tags: [String]
+    var note: String?
+    var isSelected: (MachineFilter) -> Bool
+    var onSelect: (MachineFilter) -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            HostpaneGlassGroup(spacing: 0) {
+                HStack(spacing: 8) {
+                    chip("全部", .all)
+                    chip("无标签", .untagged)
+                    ForEach(tags, id: \.self) { tag in
+                        chip(tag, .tag(tag))
+                    }
+                }
+            }
+            if let note, !note.isEmpty {
+                Text(note)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func chip(_ title: String, _ filter: MachineFilter) -> some View {
+        let selected = isSelected(filter)
+        return Button {
+            onSelect(filter)
+        } label: {
+            Text(title)
+                .font(.caption.weight(selected ? .semibold : .regular))
+                .foregroundStyle(selected ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+        }
+        .buttonStyle(.plain)
+        .buttonBorderShape(.capsule)
+        .hostpaneGlass(
+            in: Capsule(),
+            interactive: true,
+            tint: selected ? HostpaneTheme.accent : nil
+        )
+    }
+}
+
 struct HostpaneGlassGroup<Content: View>: View {
     var spacing: CGFloat
     @ViewBuilder var content: () -> Content

@@ -140,6 +140,45 @@ struct SettingsToggleRow: View {
     }
 }
 
+struct SettingsSecondsRow: View {
+    var title: String
+    @Binding var seconds: Int
+    var range: ClosedRange<Int>
+
+    var body: some View {
+        SettingsLabeledRow(title: "\(title)：\(seconds) 秒") {
+            Stepper(value: $seconds, in: range) {
+                EmptyView()
+            }
+            .labelsHidden()
+        }
+    }
+}
+
+struct SettingsLinkButtonRow: View {
+    var title: String
+    var buttonTitle: String
+    var action: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(title)
+                .font(.system(size: 14))
+            Spacer(minLength: 12)
+            Button(action: action) {
+                Text(buttonTitle)
+                    .font(.system(size: 13, weight: .medium))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color.primary.opacity(0.08), in: Capsule())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+    }
+}
+
 struct SettingsChevronRow: View {
     var title: String
     var action: () -> Void

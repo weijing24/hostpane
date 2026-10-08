@@ -27,6 +27,7 @@ public enum HostpaneSSHError: Error, LocalizedError {
     case jumpHasNoAuthentication(String)
     case notConnected
     case unsupportedOS(String)
+    case snippetTimedOut
 
     public var errorDescription: String? {
         switch self {
@@ -48,6 +49,8 @@ public enum HostpaneSSHError: Error, LocalizedError {
             return "尚未连接。"
         case .unsupportedOS(let name):
             return "当前只解析 Linux /proc 指标。远程系统是 \(name)。"
+        case .snippetTimedOut:
+            return "代码片段执行超时。"
         }
     }
 }
