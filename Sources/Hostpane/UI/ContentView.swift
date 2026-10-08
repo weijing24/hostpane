@@ -15,7 +15,7 @@ struct ContentView: View {
                 )
         } detail: {
             detail
-                .hostpaneExtendsUnderSidebar()
+                .hostpaneExtendsUnderSidebar(extendsUnderSidebar)
                 .id(model.sidebarSelection)
         }
         .navigationSplitViewStyle(.balanced)
@@ -40,6 +40,14 @@ struct ContentView: View {
         } message: {
             Text(model.importMessage ?? "")
         }
+    }
+
+    /// The extension effect mirrors the detail under the sidebar. On a live
+    /// AppKit terminal that mirror replaces the drawable, so the session
+    /// column stays a blank white surface after SSH is up.
+    private var extendsUnderSidebar: Bool {
+        if case .session = model.sidebarSelection { return false }
+        return true
     }
 
     @ViewBuilder

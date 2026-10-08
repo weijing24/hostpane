@@ -110,10 +110,14 @@ extension View {
 
     /// Lets the page background draw under the sidebar and softens the top scroll edge.
     @ViewBuilder
-    func hostpaneExtendsUnderSidebar() -> some View {
-        if #available(macOS 26.0, *) {
-            self.backgroundExtensionEffect()
-                .scrollEdgeEffectStyle(.soft, for: .top)
+    func hostpaneExtendsUnderSidebar(_ enabled: Bool = true) -> some View {
+        if enabled {
+            if #available(macOS 26.0, *) {
+                self.backgroundExtensionEffect()
+                    .scrollEdgeEffectStyle(.soft, for: .top)
+            } else {
+                self
+            }
         } else {
             self
         }

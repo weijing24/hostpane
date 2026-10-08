@@ -50,6 +50,15 @@ final class TerminalSessionController: NSObject, @preconcurrency TerminalViewDel
         if focus {
             requestFocus()
         }
+        containerDidResize()
+    }
+
+    /// The shell prompt often arrives before SwiftUI gives this view a window.
+    /// `needsDisplay` from that pass is dropped, so the layer stays the solid
+    /// background color until something else invalidates it.
+    func containerDidResize() {
+        guard terminalView.bounds.width > 1, terminalView.bounds.height > 1 else { return }
+        terminalView.needsDisplay = true
     }
 
     private var appliedDark: Bool?

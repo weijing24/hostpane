@@ -22,18 +22,20 @@ struct TerminalSessionView: View {
         let runtime = model.runtime(for: host.id)
         NavigationStack {
             ZStack {
-                if runtime.progress.cardVisible, runtime.phase != .idle {
-                    ConnectionInfoView(host: host)
-                } else if runtime.phase == .connected {
+                if runtime.phase == .connected {
                     RemoteTerminalView(
                         controller: runtime.terminal,
                         isDark: model.isDarkAppearance,
                         settings: model.settings
                     )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .padding(.horizontal, 8)
                     .padding(.bottom, 8)
-                } else {
+                } else if !(runtime.progress.cardVisible && runtime.phase != .idle) {
                     HostpaneTheme.page
+                }
+                if runtime.progress.cardVisible, runtime.phase != .idle {
+                    ConnectionInfoView(host: host)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
