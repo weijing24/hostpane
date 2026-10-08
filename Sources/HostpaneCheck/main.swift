@@ -100,6 +100,38 @@ func inspectMetricChecks() throws {
     guard let docker = second.containers.first else { throw CheckFailure.message("docker missing") }
     try expect(abs((docker.netReceiveBytesPerSecond ?? -1) - 1_000) < 0.1, "docker rx \(String(describing: docker.netReceiveBytesPerSecond))")
     try expect(abs((docker.netTransmitBytesPerSecond ?? -1) - 2_000) < 0.1, "docker tx")
+
+    let hot = try parser.consume(
+        sample(idle: 80, totalIdleAndBusy: 200, rx: 4_000, tx: 7_000),
+        at: Date(timeIntervalSince1970: 17)
+    )
+    try expect(hot.containers.count == 1 && hot.containers[0].name == "web", "fast sample keeps docker cards")
+    try expect(abs((hot.netReceiveBytesPerSecond ?? -1) - 200) < 0.1, "fast sample still rates the host nic")
+
+    let summary = parser.overlayDockerSummary(
+        """
+        HP_BEGIN
+        docker_engine=27.1.1
+        docker_images=4
+        docker_running=2
+        docker_stopped=1
+        HP_END
+        """,
+        onto: hot
+    )
+    try expect(summary.dockerEngineVersion == "27.1.1", "docker summary engine")
+    try expect(summary.dockerRunningCount == 2 && summary.dockerImageCount == 4, "docker summary counts")
+    try expect(summary.containers.count == 1, "summary keeps cards")
+    try expect(summary.cpuCores == hot.cpuCores, "summary leaves cpu")
+
+    try expect(!LinuxMetricsProbe.remoteCommand.contains("docker stats"), "hot path has no docker stats")
+    try expect(!LinuxMetricsProbe.remoteCommand.contains("docker version"), "hot path has no docker version")
+    try expect(!LinuxMetricsProbe.remoteCommand.contains("docker ps"), "hot path has no docker ps")
+    try expect(LinuxMetricsProbe.remoteCommand.contains("/proc/stat"), "hot path still reads cpu")
+    try expect(LinuxMetricsProbe.dockerSummaryCommand.contains("docker ps -q"), "slow path counts containers")
+    try expect(!LinuxMetricsProbe.dockerSummaryCommand.contains("docker stats"), "slow path skips stats")
+    try expect(LinuxMetricsProbe.dockerCardsCommand.contains("docker stats"), "visible card can request stats")
+    try expect(sshReconnectClassificationProbes(), "link loss reconnects and auth failure does not")
 }
 
 func storageSelectionChecks() throws {

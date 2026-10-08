@@ -22,7 +22,7 @@ struct TerminalSessionView: View {
         let runtime = model.runtime(for: host.id)
         NavigationStack {
             ZStack {
-                if runtime.phase == .connected {
+                if runtime.phase == .connected || runtime.terminalDesired {
                     RemoteTerminalView(
                         controller: runtime.terminal,
                         isDark: model.isDarkAppearance,
@@ -78,7 +78,7 @@ struct TerminalSessionView: View {
             }
         }
         switch runtime.phase {
-        case .connecting: return "终端 · 连接中"
+        case .connecting: return runtime.terminalReconnecting ? "终端 · 正在重连" : "终端 · 连接中"
         case .connected: return "终端 · 运行中"
         case .failed: return "终端 · 失败"
         case .idle: return "终端"

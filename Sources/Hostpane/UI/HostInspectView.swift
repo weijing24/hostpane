@@ -124,7 +124,15 @@ struct HostInspectView: View {
                 StorageDetailSheet(hostID: host.id)
             }
         }
-        .onAppear { model.startMonitor(host) }
+        .onAppear {
+            model.noteStatusDetail(host.id)
+            model.startMonitor(host)
+        }
+        .onDisappear {
+            if model.statusDetailHostID == host.id {
+                model.noteStatusDetail(nil)
+            }
+        }
     }
 
     private var useDarkBackground: Bool {
@@ -164,7 +172,7 @@ struct HostInspectView: View {
         case .storage:
             storageCard(runtime)
         case .docker:
-            dockerSection(runtime.metrics?.containers ?? [])
+            dockerSection(visibleContainers(runtime))
         }
     }
 
@@ -457,6 +465,17 @@ struct HostInspectView: View {
         }
         .contentShape(Rectangle())
         .onTapGesture { detail = .storage }
+    }
+
+    private func visibleContainers(_ runtime: HostRuntime) -> [ContainerSample] {
+        if runtime.dockerPhase == .connected || runtime.dockerPhase == .connecting,
+           let snapshot = runtime.dockerSnapshot {
+            let running = snapshot.containers.filter(\.isRunning)
+            if !running.isEmpty || runtime.dockerPhase == .connected {
+                return running.map(ContainerSample.init(container:))
+            }
+        }
+        return runtime.metrics?.containers ?? []
     }
 
     @ViewBuilder

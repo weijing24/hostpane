@@ -219,6 +219,21 @@ public struct ContainerSample: Equatable, Sendable, Identifiable {
         self.blockReadBytesPerSecond = blockReadBytesPerSecond
         self.blockWriteBytesPerSecond = blockWriteBytesPerSecond
     }
+
+    public init(container: DockerContainer) {
+        self.init(
+            name: container.name,
+            status: container.status,
+            cpuRatio: container.cpuRatio,
+            memoryRatio: container.memoryRatio,
+            memoryUsedBytes: container.memoryUsedBytes,
+            memoryLimitBytes: container.memoryLimitBytes,
+            netReceiveBytes: container.netReceiveBytes,
+            netTransmitBytes: container.netTransmitBytes,
+            blockReadBytes: container.blockReadBytes,
+            blockWriteBytes: container.blockWriteBytes
+        )
+    }
 }
 
 public struct HostMetrics: Equatable, Sendable {

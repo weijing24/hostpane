@@ -18,7 +18,10 @@ struct HostpaneApp: App {
             ContentView()
                 .environment(model)
                 .preferredColorScheme(model.settings.appearance.colorScheme)
-                .onAppear { model.applyAppearance() }
+                .onAppear {
+                    model.applyAppearance()
+                    model.startLinkRecovery()
+                }
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
                     model.reloadSyncedDataIfDiskChanged()
                 }

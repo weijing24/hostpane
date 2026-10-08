@@ -3,6 +3,13 @@ import HostpaneCore
 import SwiftTerm
 import Traversio
 
+enum TerminalEnd: Equatable, Sendable {
+    /// The remote shell exited. The user closed it, so the session should not come back.
+    case shellExited(UInt32)
+    /// The SSH transport died. Sleep, a network change, or a server restart.
+    case dropped
+}
+
 @MainActor
 final class TerminalSessionController: NSObject, @preconcurrency TerminalViewDelegate {
     private(set) var title: String = "Terminal"
@@ -21,7 +28,7 @@ final class TerminalSessionController: NSObject, @preconcurrency TerminalViewDel
     private var didBecomeReady = false
 
     var onReadyToOpenShell: ((UInt32, UInt32) -> Void)?
-    var onSessionEnded: (() -> Void)?
+    var onSessionEnded: ((TerminalEnd) -> Void)?
     var isBellEnabled: () -> Bool = { true }
 
     override init() {
@@ -159,16 +166,27 @@ final class TerminalSessionController: NSObject, @preconcurrency TerminalViewDel
     }
 
     func unbind() {
-        resizeTask?.cancel()
-        cancelInput()
+        releaseChannel()
         onReadyToOpenShell = nil
         onSessionEnded = nil
-        session = nil
         pendingOutput.removeAll(keepingCapacity: true)
+        terminalView.getTerminal().resetToInitialState()
+    }
+
+    /// Drop the SSH channel and keep the scrollback for a reconnect.
+    func releaseChannel() {
+        resizeTask?.cancel()
+        cancelInput()
+        session = nil
+        didEnd = false
         didBecomeReady = false
         lastSentColumns = 0
         lastSentRows = 0
-        terminalView.getTerminal().resetToInitialState()
+    }
+
+    func feedStatus(_ message: String) {
+        let line = "\r\n\u{1b}[33m[Hostpane] \(message)\u{1b}[0m\r\n"
+        feed(Array(line.utf8))
     }
 
     func requestFocus() {
@@ -188,18 +206,21 @@ final class TerminalSessionController: NSObject, @preconcurrency TerminalViewDel
                 switch event {
                 case .standardOutput(let bytes), .standardError(let bytes):
                     feed(bytes)
-                case .endOfFile, .exitStatus, .exitSignal:
-                    finishSession()
+                case .exitStatus(let code):
+                    finishSession(.shellExited(code))
+                    return
+                case .endOfFile, .exitSignal:
+                    finishSession(.dropped)
                     return
                 @unknown default:
                     break
                 }
             }
-            finishSession()
+            finishSession(.dropped)
         } catch is CancellationError {
             return
         } catch {
-            finishSession()
+            finishSession(.dropped)
         }
     }
 
@@ -285,12 +306,12 @@ final class TerminalSessionController: NSObject, @preconcurrency TerminalViewDel
         )
     }
 
-    private func finishSession() {
+    private func finishSession(_ end: TerminalEnd) {
         guard !didEnd else { return }
         didEnd = true
         cancelInput()
         session = nil
-        onSessionEnded?()
+        onSessionEnded?(end)
     }
 
     private func startInputPumpIfNeeded() {

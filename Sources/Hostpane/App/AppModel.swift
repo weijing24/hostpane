@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import Network
 import Observation
 import HostpaneCore
 import Traversio
@@ -92,6 +93,10 @@ final class HostRuntime {
     var metricsTask: Task<Void, Never>?
     var monitorTask: Task<Void, Never>?
     var shellTask: Task<Void, Never>?
+    /// The user opened a terminal and has not closed it or exited the shell.
+    var terminalDesired = false
+    var terminalReconnecting = false
+    var lastLinkRevive: ContinuousClock.Instant?
     /// Set for the whole `openShell` call. `shellTask` is assigned only after
     /// the channel exists, so a second start must not treat that gap as idle.
     var shellOpening = false
@@ -156,7 +161,7 @@ final class HostRuntime {
         }
     }
 
-    func stop() {
+    func stop(resetTerminal: Bool = true) {
         metricsTask?.cancel()
         monitorTask?.cancel()
         shellTask?.cancel()
@@ -165,7 +170,13 @@ final class HostRuntime {
         shellTask = nil
         shellOpening = false
         shellGeneration += 1
-        terminal.unbind()
+        if resetTerminal {
+            terminalDesired = false
+            terminalReconnecting = false
+            terminal.unbind()
+        } else {
+            terminal.releaseChannel()
+        }
         progress.reset()
         let engine = self.engine
         let monitorEngine = self.monitorEngine
@@ -259,6 +270,8 @@ final class AppModel {
     var dashboardFilter: MachineFilter = .all
     var dockerSearch: String = ""
     var dockerInspectHostID: UUID?
+    /// Host whose status-detail page is on screen. Docker card stats run only for this host.
+    var statusDetailHostID: UUID?
     var editor: HostEditorState?
     var keyEditor: KeyEditorState?
     var importMessage: String?
@@ -285,6 +298,13 @@ final class AppModel {
     private let importer: SSHConfigImporter
     private let settingsStore: SettingsStore
     private let snippetStore: SnippetStore
+    private var pathMonitor: NWPathMonitor?
+    private var wakeObserver: NSObjectProtocol?
+    private var pathSatisfied = true
+    private var lastInterfaceNames: [String] = []
+    private var recoveryGeneration = 0
+    private var recoveryTask: Task<Void, Never>?
+    private var lastTerminalReconnect: [UUID: ContinuousClock.Instant] = [:]
     private var appearanceObserver: NSObjectProtocol?
 
     init(
@@ -412,8 +432,10 @@ final class AppModel {
     }
 
     var activeSessions: [HostRecord] {
-        hosts.filter {
-            switch runtime(for: $0.id).phase {
+        hosts.filter { host in
+            let runtime = runtime(for: host.id)
+            if runtime.terminalDesired { return true }
+            switch runtime.phase {
             case .connecting, .connected: return true
             default: return false
             }
@@ -987,13 +1009,24 @@ final class AppModel {
         switch runtime.phase {
         case .connecting, .connected:
             return
-        case .idle, .failed:
+        case .idle:
             startConnection(host, sampleMetrics: true)
+        case .failed:
+            if runtime.terminalDesired {
+                reconnectTerminal(host)
+            } else {
+                startConnection(host, sampleMetrics: true)
+            }
         }
     }
 
     func restartTerminal(_ host: HostRecord) {
-        startConnection(host, sampleMetrics: true)
+        let runtime = runtime(for: host.id)
+        if runtime.terminalDesired {
+            reconnectTerminal(host)
+        } else {
+            startConnection(host, sampleMetrics: true)
+        }
     }
 
     func openSessionInNewWindow(_ host: HostRecord) {
@@ -1013,8 +1046,14 @@ final class AppModel {
         switch runtime.phase {
         case .connecting, .connected:
             return
-        case .idle, .failed:
+        case .idle:
             startConnection(host, sampleMetrics: true)
+        case .failed:
+            if runtime.terminalDesired {
+                reconnectTerminal(host)
+            } else {
+                startConnection(host, sampleMetrics: true)
+            }
         }
     }
 
@@ -1760,27 +1799,33 @@ final class AppModel {
     }
 
     func startDashboardMonitors() {
-        for host in hosts {
-            if host.showOnDashboard {
-                startMonitor(host)
-            } else {
-                stopMonitor(host)
-            }
+        let shown = hosts.filter(\.showOnDashboard)
+        for (index, host) in shown.enumerated() {
+            startMonitor(host, connectDelay: LinuxMetricsProbe.monitorStagger * index)
+        }
+        for host in hosts where !host.showOnDashboard {
+            stopMonitor(host)
         }
     }
 
     func refreshDashboard() {
-        for host in hosts where host.showOnDashboard {
-            startMonitor(host, restart: true)
+        let shown = hosts.filter(\.showOnDashboard)
+        for (index, host) in shown.enumerated() {
+            startMonitor(host, restart: true, connectDelay: LinuxMetricsProbe.monitorStagger * index)
         }
     }
 
     func refreshFailedDashboard() {
-        for host in hosts where host.showOnDashboard {
-            if runtime(for: host.id).reachability == .offline {
-                startMonitor(host, restart: true)
-            }
+        let failed = hosts.filter { host in
+            host.showOnDashboard && runtime(for: host.id).reachability == .offline
         }
+        for (index, host) in failed.enumerated() {
+            startMonitor(host, restart: true, connectDelay: LinuxMetricsProbe.monitorStagger * index)
+        }
+    }
+
+    func noteStatusDetail(_ hostID: UUID?) {
+        statusDetailHostID = hostID
     }
 
     func stopMonitor(_ host: HostRecord) {
@@ -1798,7 +1843,7 @@ final class AppModel {
         Task { await engine.close() }
     }
 
-    func startMonitor(_ host: HostRecord, restart: Bool = false) {
+    func startMonitor(_ host: HostRecord, restart: Bool = false, connectDelay: Duration = .zero) {
         guard !host.hostname.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let runtime = runtime(for: host.id)
         switch runtime.phase {
@@ -1827,6 +1872,10 @@ final class AppModel {
         let settings = self.settings
         runtime.monitorTask = Task { [weak self, weak runtime] in
             guard let self, let runtime else { return }
+            if connectDelay > .zero {
+                try? await Task.sleep(for: connectDelay)
+                guard !Task.isCancelled else { return }
+            }
             await Task.yield()
             let started = ContinuousClock.now
             await engine.close()
@@ -1839,8 +1888,23 @@ final class AppModel {
                 await Self.holdConnectingBadge(from: started)
                 guard !Task.isCancelled else { return }
                 runtime.monitorPhase = .connected
-                await self.sampleLoop(runtime: runtime, engine: engine)
+                let end = await self.sampleLoop(runtime: runtime, engine: engine)
                 guard !Task.isCancelled else { return }
+                if end == .linkLost {
+                    runtime.monitorPhase = .failed(runtime.lastError ?? "连接中断")
+                    guard let current = self.hosts.first(where: { $0.id == host.id }),
+                          current.showOnDashboard
+                    else { return }
+                    if let last = runtime.lastLinkRevive,
+                       ContinuousClock.now - last < .seconds(8) {
+                        return
+                    }
+                    runtime.lastLinkRevive = ContinuousClock.now
+                    try? await Task.sleep(for: .seconds(2))
+                    guard !Task.isCancelled else { return }
+                    self.startMonitor(current, restart: true)
+                    return
+                }
                 runtime.monitorPhase = .idle
             } catch is CancellationError {
                 return
@@ -1869,8 +1933,96 @@ final class AppModel {
 
     func sessionDidEnd(_ host: HostRecord) {
         runtime(for: host.id).stop()
-        sidebarSelection = .machines
+        if case .session(let id) = sidebarSelection, id == host.id {
+            sidebarSelection = .machines
+        }
         resumeMonitorIfNeeded(host)
+    }
+
+    func reconnectTerminal(_ host: HostRecord, connectDelay: Duration = .zero) {
+        let runtime = runtime(for: host.id)
+        guard runtime.terminalDesired else { return }
+        let now = ContinuousClock.now
+        if connectDelay == .zero, let last = lastTerminalReconnect[host.id], now - last < .seconds(3) {
+            return
+        }
+        lastTerminalReconnect[host.id] = now
+        logger.info("ssh", "reconnect terminal \(host.displayName)")
+        startConnection(host, sampleMetrics: true, preserveTerminal: true, connectDelay: connectDelay)
+    }
+
+    func startLinkRecovery() {
+        guard pathMonitor == nil else { return }
+        let monitor = NWPathMonitor()
+        pathMonitor = monitor
+        monitor.pathUpdateHandler = { [weak self] path in
+            Task { @MainActor in
+                self?.handleNetworkPath(path)
+            }
+        }
+        monitor.start(queue: DispatchQueue(label: "hostpane.link"))
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.scheduleLinkRecovery()
+            }
+        }
+    }
+
+    private func handleNetworkPath(_ path: NWPath) {
+        let names = path.availableInterfaces.map(\.name).sorted()
+        let satisfied = path.status == .satisfied
+        let cameBack = satisfied && !pathSatisfied
+        let interfaceChanged = satisfied && pathSatisfied && names != lastInterfaceNames && !lastInterfaceNames.isEmpty
+        pathSatisfied = satisfied
+        if satisfied {
+            lastInterfaceNames = names
+        }
+        if cameBack || interfaceChanged {
+            scheduleLinkRecovery()
+        }
+    }
+
+    private func scheduleLinkRecovery() {
+        recoveryGeneration += 1
+        let generation = recoveryGeneration
+        recoveryTask?.cancel()
+        recoveryTask = Task { [weak self] in
+            let deadline = ContinuousClock.now.advanced(by: .seconds(20))
+            while let self, !Task.isCancelled, self.recoveryGeneration == generation {
+                if self.pathSatisfied || ContinuousClock.now >= deadline {
+                    break
+                }
+                try? await Task.sleep(for: .milliseconds(400))
+            }
+            try? await Task.sleep(for: .milliseconds(600))
+            guard !Task.isCancelled, let self, self.recoveryGeneration == generation else { return }
+            self.recoverOpenLinks()
+        }
+    }
+
+    private func recoverOpenLinks() {
+        logger.info("ssh", "recover dashboard monitors and open terminals")
+        var index = 0
+        let terminals = hosts.filter { runtime(for: $0.id).terminalDesired }
+        for host in terminals {
+            reconnectTerminal(host, connectDelay: LinuxMetricsProbe.monitorStagger * index)
+            index += 1
+        }
+        let terminalIDs = Set(terminals.map(\.id))
+        for host in hosts where host.showOnDashboard && !terminalIDs.contains(host.id) {
+            switch runtime(for: host.id).monitorPhase {
+            case .idle:
+                continue
+            case .connecting, .connected, .failed:
+                runtime(for: host.id).lastLinkRevive = nil
+                startMonitor(host, restart: true, connectDelay: LinuxMetricsProbe.monitorStagger * index)
+                index += 1
+            }
+        }
     }
 
     func disconnect(_ host: HostRecord) {
@@ -1886,9 +2038,19 @@ final class AppModel {
         startMonitor(current)
     }
 
-    private func startConnection(_ host: HostRecord, sampleMetrics: Bool) {
+    private func startConnection(
+        _ host: HostRecord,
+        sampleMetrics: Bool,
+        preserveTerminal: Bool = false,
+        connectDelay: Duration = .zero
+    ) {
         let runtime = runtime(for: host.id)
-        runtime.stop()
+        if preserveTerminal {
+            runtime.terminal.feedStatus("连接中断，正在重连…")
+        }
+        runtime.stop(resetTerminal: !preserveTerminal)
+        runtime.terminalDesired = true
+        runtime.terminalReconnecting = preserveTerminal
         runtime.phase = .connecting
         runtime.lastError = nil
         runtime.parser = LinuxMetricsParser()
@@ -1901,6 +2063,10 @@ final class AppModel {
         let settings = self.settings
         runtime.metricsTask = Task { [weak self, weak runtime] in
             guard let self, let runtime else { return }
+            if connectDelay > .zero {
+                try? await Task.sleep(for: connectDelay)
+                guard !Task.isCancelled else { return }
+            }
             do {
                 let hostID = host.id
                 try await engine.connect(host: host, secrets: secrets, settings: settings) { event in
@@ -1914,8 +2080,15 @@ final class AppModel {
                 runtime.progress.mark(.authentication, .done)
                 runtime.progress.mark(.shell, .running)
                 runtime.phase = .connected
-                runtime.terminal.onSessionEnded = { [weak self] in
-                    self?.sessionDidEnd(host)
+                runtime.terminalReconnecting = false
+                runtime.terminal.onSessionEnded = { [weak self] end in
+                    guard let self else { return }
+                    switch end {
+                    case .shellExited:
+                        self.sessionDidEnd(host)
+                    case .dropped:
+                        self.reconnectTerminal(host)
+                    }
                 }
                 runtime.terminal.onReadyToOpenShell = { [weak self] columns, rows in
                     Task { @MainActor in
@@ -1935,7 +2108,11 @@ final class AppModel {
                     await self.startShell(host: host, runtime: runtime, columns: 120, rows: 36)
                 }
                 if sampleMetrics {
-                    await self.sampleLoop(runtime: runtime, engine: engine)
+                    let end = await self.sampleLoop(runtime: runtime, engine: engine)
+                    guard !Task.isCancelled else { return }
+                    if end == .linkLost {
+                        self.reconnectTerminal(host)
+                    }
                 }
             } catch is CancellationError {
                 runtime.phase = .idle
@@ -1943,6 +2120,9 @@ final class AppModel {
                 runtime.progress.failRemaining()
                 runtime.phase = .failed(describeSSHError(error))
                 runtime.lastError = describeSSHError(error)
+                if runtime.terminalDesired {
+                    runtime.terminal.feedStatus("重连失败：\(describeSSHError(error))")
+                }
             }
         }
     }
@@ -2008,9 +2188,15 @@ final class AppModel {
         }
     }
 
-    private func sampleLoop(runtime: HostRuntime, engine: SSHEngine) async {
+    private enum SampleEnd {
+        case cancelled
+        case linkLost
+    }
+
+    private func sampleLoop(runtime: HostRuntime, engine: SSHEngine) async -> SampleEnd {
         var isFirst = true
         var latencyDue = ContinuousClock.now
+        var dockerSummaryDue = ContinuousClock.now
         while !Task.isCancelled {
             let refresh = settings.statusRefreshSeconds
             let latencyEvery = settings.latencyRefreshSeconds
@@ -2025,6 +2211,15 @@ final class AppModel {
 
                 let result = try await engine.execute(LinuxMetricsProbe.remoteCommand)
                 var metrics = try runtime.parser.consume(String(decoding: result.standardOutput, as: UTF8.self))
+                if !dashboardDockerPaused(runtime) {
+                    if ContinuousClock.now >= dockerSummaryDue {
+                        metrics = try await overlayDockerSummary(on: runtime, engine: engine, metrics: metrics)
+                        dockerSummaryDue = ContinuousClock.now.advanced(by: LinuxMetricsProbe.dockerSummaryInterval)
+                    }
+                    if wantsDockerCards(runtime) {
+                        metrics = try await overlayDockerCards(on: runtime, engine: engine, metrics: metrics)
+                    }
+                }
                 metrics.sshLatencySeconds = runtime.latencySeconds
                 runtime.metrics = metrics
                 runtime.recordLoad(from: metrics)
@@ -2032,14 +2227,57 @@ final class AppModel {
                     runtime.lastError = HostpaneSSHError.unsupportedOS(metrics.operatingSystem).errorDescription
                 }
             } catch is CancellationError {
-                return
+                return .cancelled
             } catch {
                 runtime.lastError = describeSSHError(error)
+                if sshFailureShouldReconnect(error) {
+                    return .linkLost
+                }
             }
             let delay: Duration = isFirst ? .milliseconds(400) : .seconds(refresh)
             isFirst = false
             try? await Task.sleep(for: delay)
         }
+        return .cancelled
+    }
+
+    /// The Docker page already polls `docker stats`. Don't run that work again from the dashboard.
+    private func dashboardDockerPaused(_ runtime: HostRuntime) -> Bool {
+        switch runtime.dockerPhase {
+        case .connecting, .connected:
+            return true
+        case .idle, .failed:
+            return false
+        }
+    }
+
+    private func wantsDockerCards(_ runtime: HostRuntime) -> Bool {
+        guard statusDetailHostID == runtime.hostID else { return false }
+        return settings.statusLayout.cards.contains { $0.kind == .docker }
+    }
+
+    private func overlayDockerSummary(
+        on runtime: HostRuntime,
+        engine: SSHEngine,
+        metrics: HostMetrics
+    ) async throws -> HostMetrics {
+        let result = try await engine.execute(LinuxMetricsProbe.dockerSummaryCommand)
+        return runtime.parser.overlayDockerSummary(
+            String(decoding: result.standardOutput, as: UTF8.self),
+            onto: metrics
+        )
+    }
+
+    private func overlayDockerCards(
+        on runtime: HostRuntime,
+        engine: SSHEngine,
+        metrics: HostMetrics
+    ) async throws -> HostMetrics {
+        let result = try await engine.execute(LinuxMetricsProbe.dockerCardsCommand)
+        return runtime.parser.overlayDockerCards(
+            String(decoding: result.standardOutput, as: UTF8.self),
+            onto: metrics
+        )
     }
 
     func beginAddExistingKey() {

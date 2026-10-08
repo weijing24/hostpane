@@ -42,10 +42,6 @@ public struct LinuxMetricsProbe {
       cpu_model=$(uname -m)
     fi
     echo "cpu_model=$cpu_model ($(uname -m))"
-    echo "docker_engine=$(docker version --format '{{.Server.Version}}' 2>/dev/null || true)"
-    echo "docker_images=$(docker images -q 2>/dev/null | wc -l | tr -d ' ')"
-    echo "docker_running=$(docker ps -q 2>/dev/null | wc -l | tr -d ' ')"
-    echo "docker_stopped=$(docker ps -aq -f status=exited 2>/dev/null | wc -l | tr -d ' ')"
     echo HP_STAT
     if [ -r /proc/stat ]; then
       grep '^cpu' /proc/stat
@@ -74,6 +70,24 @@ public struct LinuxMetricsProbe {
     fi
     echo HP_PROC
     ps -eo pid=,user:12=,pcpu=,pmem=,rss=,comm= --sort=-pcpu 2>/dev/null | head -n 80
+    echo HP_END
+    """#
+
+    /// Cheap Docker inventory. Not part of the 5s hot path.
+    public static let dockerSummaryCommand = #"""
+    LANG=C LC_ALL=C
+    echo HP_BEGIN
+    echo "docker_engine=$(docker version --format '{{.Server.Version}}' 2>/dev/null || true)"
+    echo "docker_images=$(docker images -q 2>/dev/null | wc -l | tr -d ' ')"
+    echo "docker_running=$(docker ps -q 2>/dev/null | wc -l | tr -d ' ')"
+    echo "docker_stopped=$(docker ps -aq -f status=exited 2>/dev/null | wc -l | tr -d ' ')"
+    echo HP_END
+    """#
+
+    /// Per-container stats. Only when the status-detail Docker card is on screen.
+    public static let dockerCardsCommand = #"""
+    LANG=C LC_ALL=C
+    echo HP_BEGIN
     echo HP_DOCKER
     if command -v docker >/dev/null 2>&1; then
       docker stats --no-stream --format '{{.Name}}|{{.CPUPerc}}|{{.MemPerc}}|{{.MemUsage}}|{{.NetIO}}|{{.BlockIO}}' 2>/dev/null | head -n 40
@@ -85,6 +99,12 @@ public struct LinuxMetricsProbe {
     echo HP_END
     """#
 
+    /// How often dashboard sampling refreshes Docker counts.
+    public static let dockerSummaryInterval = Duration.seconds(60)
+
+    /// Gap between SSH handshakes when several dashboard hosts connect together.
+    public static let monitorStagger = Duration.seconds(2)
+
     public init() {}
 }
 
@@ -94,6 +114,12 @@ public struct LinuxMetricsParser {
     private var lastIfaces: [String: IfaceCounters] = [:]
     private var lastDiskDevices: [String: DeviceIOCounters] = [:]
     private var lastDocker: [String: DockerIO] = [:]
+    private var lastDockerAt: Date?
+    private var keptContainers: [ContainerSample] = []
+    private var keptEngine = ""
+    private var keptImages = 0
+    private var keptRunning = 0
+    private var keptStopped = 0
     private var lastSampleAt: Date?
 
     public init() {}
@@ -116,8 +142,8 @@ public struct LinuxMetricsParser {
         let memory = Self.parseMeminfo(sections.body("HP_MEM"))
         var disks = Self.parseDF(sections.body("HP_DISK"))
         let processes = Self.parseProcesses(sections.body("HP_PROC"))
-        let dockerStatus = Self.parseDockerPS(sections.body("HP_DOCKERPS"))
-        let dockerRaw = Self.parseDockerStats(sections.body("HP_DOCKER"), status: dockerStatus)
+        rememberDockerSummary(sections)
+        let containers = dockerContainers(sections, at: date)
 
         var cpuUsage: Double?
         var cpuTimes: CPUTimes?
@@ -141,7 +167,6 @@ public struct LinuxMetricsParser {
         var diskReadRate: Double?
         var diskWriteRate: Double?
         var interfaces: [InterfaceSample] = []
-        var containers: [ContainerSample] = []
 
         if let lastSampleAt {
             let dt = date.timeIntervalSince(lastSampleAt)
@@ -191,28 +216,6 @@ public struct LinuxMetricsParser {
                     diskWriteRate = max(0, Double(hostWrite.subtractingReportingOverflow(previousHostWrite).partialValue) / dt)
                 }
                 Self.applyDiskIO(&disks, current: diskIOCounters, previous: lastDiskDevices, dt: dt)
-                for item in dockerRaw {
-                    var next = item
-                    if let previous = lastDocker[item.name] {
-                        next.netReceiveBytesPerSecond = max(
-                            0,
-                            Double(item.netReceiveBytes.subtractingReportingOverflow(previous.rx).partialValue) / dt
-                        )
-                        next.netTransmitBytesPerSecond = max(
-                            0,
-                            Double(item.netTransmitBytes.subtractingReportingOverflow(previous.tx).partialValue) / dt
-                        )
-                        next.blockReadBytesPerSecond = max(
-                            0,
-                            Double(item.blockReadBytes.subtractingReportingOverflow(previous.blockRead).partialValue) / dt
-                        )
-                        next.blockWriteBytesPerSecond = max(
-                            0,
-                            Double(item.blockWriteBytes.subtractingReportingOverflow(previous.blockWrite).partialValue) / dt
-                        )
-                    }
-                    containers.append(next)
-                }
             } else {
                 interfaces = ifaceCounters.compactMap { name, counters in
                     guard Self.shouldCountInterface(name) else { return nil }
@@ -224,7 +227,6 @@ public struct LinuxMetricsParser {
                     )
                 }
                 Self.applyDiskIO(&disks, current: diskIOCounters, previous: [:], dt: 0)
-                containers = dockerRaw
             }
         } else {
             interfaces = ifaceCounters.compactMap { name, counters in
@@ -237,19 +239,14 @@ public struct LinuxMetricsParser {
                 )
             }
             Self.applyDiskIO(&disks, current: diskIOCounters, previous: [:], dt: 0)
-            containers = dockerRaw
         }
 
         interfaces.sort { $0.name < $1.name }
-        containers.sort { $0.name < $1.name }
 
         lastCPU = cpuStat.aggregate
         lastCores = cpuStat.cores
         lastIfaces = ifaceCounters
         lastDiskDevices = diskIOCounters
-        lastDocker = Dictionary(uniqueKeysWithValues: dockerRaw.map {
-            ($0.name, DockerIO(rx: $0.netReceiveBytes, tx: $0.netTransmitBytes, blockRead: $0.blockReadBytes, blockWrite: $0.blockWriteBytes))
-        })
         lastSampleAt = date
 
         return HostMetrics(
@@ -278,12 +275,113 @@ public struct LinuxMetricsParser {
             diskWriteBytesPerSecond: diskWriteRate,
             processes: processes,
             containers: containers,
-            dockerEngineVersion: sections.field("docker_engine") ?? "",
-            dockerImageCount: Int(sections.field("docker_images") ?? "") ?? 0,
-            dockerRunningCount: Int(sections.field("docker_running") ?? "") ?? 0,
-            dockerStoppedCount: Int(sections.field("docker_stopped") ?? "") ?? 0,
+            dockerEngineVersion: keptEngine,
+            dockerImageCount: keptImages,
+            dockerRunningCount: keptRunning,
+            dockerStoppedCount: keptStopped,
             sampledAt: date
         )
+    }
+
+    public mutating func overlayDockerSummary(_ text: String, onto metrics: HostMetrics) -> HostMetrics {
+        var next = metrics
+        let sections = SectionMap(text: text)
+        rememberDockerSummary(sections)
+        next.dockerEngineVersion = keptEngine
+        next.dockerImageCount = keptImages
+        next.dockerRunningCount = keptRunning
+        next.dockerStoppedCount = keptStopped
+        next.containers = keptContainers
+        return next
+    }
+
+    public mutating func overlayDockerCards(
+        _ text: String,
+        at date: Date = Date(),
+        onto metrics: HostMetrics
+    ) -> HostMetrics {
+        var next = metrics
+        let sections = SectionMap(text: text)
+        if sections.hasBody("HP_DOCKER") || sections.hasBody("HP_DOCKERPS") {
+            next.containers = takeDockerCards(sections, at: date)
+        } else {
+            next.containers = keptContainers
+        }
+        next.dockerEngineVersion = keptEngine
+        next.dockerImageCount = keptImages
+        next.dockerRunningCount = keptRunning
+        next.dockerStoppedCount = keptStopped
+        return next
+    }
+
+    private mutating func rememberDockerSummary(_ sections: SectionMap) {
+        if let value = sections.field("docker_engine") {
+            keptEngine = value
+        }
+        if let raw = sections.field("docker_images"), let count = Int(raw) {
+            keptImages = count
+        }
+        if let raw = sections.field("docker_running"), let count = Int(raw) {
+            keptRunning = count
+        }
+        if let raw = sections.field("docker_stopped"), let count = Int(raw) {
+            keptStopped = count
+        }
+    }
+
+    private mutating func dockerContainers(_ sections: SectionMap, at date: Date) -> [ContainerSample] {
+        guard sections.hasBody("HP_DOCKER") || sections.hasBody("HP_DOCKERPS") else {
+            return keptContainers
+        }
+        return takeDockerCards(sections, at: date)
+    }
+
+    private mutating func takeDockerCards(_ sections: SectionMap, at date: Date) -> [ContainerSample] {
+        let dockerStatus = Self.parseDockerPS(sections.body("HP_DOCKERPS"))
+        let dockerRaw = Self.parseDockerStats(sections.body("HP_DOCKER"), status: dockerStatus)
+        let dt = lastDockerAt.map { date.timeIntervalSince($0) } ?? 0
+        var containers: [ContainerSample] = []
+        if dt > 0.2 {
+            for item in dockerRaw {
+                var next = item
+                if let previous = lastDocker[item.name] {
+                    next.netReceiveBytesPerSecond = max(
+                        0,
+                        Double(item.netReceiveBytes.subtractingReportingOverflow(previous.rx).partialValue) / dt
+                    )
+                    next.netTransmitBytesPerSecond = max(
+                        0,
+                        Double(item.netTransmitBytes.subtractingReportingOverflow(previous.tx).partialValue) / dt
+                    )
+                    next.blockReadBytesPerSecond = max(
+                        0,
+                        Double(item.blockReadBytes.subtractingReportingOverflow(previous.blockRead).partialValue) / dt
+                    )
+                    next.blockWriteBytesPerSecond = max(
+                        0,
+                        Double(item.blockWriteBytes.subtractingReportingOverflow(previous.blockWrite).partialValue) / dt
+                    )
+                }
+                containers.append(next)
+            }
+        } else {
+            containers = dockerRaw
+        }
+        containers.sort { $0.name < $1.name }
+        lastDocker = Dictionary(uniqueKeysWithValues: dockerRaw.map {
+            (
+                $0.name,
+                DockerIO(
+                    rx: $0.netReceiveBytes,
+                    tx: $0.netTransmitBytes,
+                    blockRead: $0.blockReadBytes,
+                    blockWrite: $0.blockWriteBytes
+                )
+            )
+        })
+        lastDockerAt = date
+        keptContainers = containers
+        return containers
     }
 
     private static func parseLoadAverage(_ raw: String?) -> (Double, Double, Double)? {
@@ -694,4 +792,5 @@ private struct SectionMap {
 
     func field(_ key: String) -> String? { fields[key] }
     func body(_ key: String) -> String { bodies[key] ?? "" }
+    func hasBody(_ key: String) -> Bool { bodies[key] != nil }
 }

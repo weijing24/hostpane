@@ -323,6 +323,44 @@ public actor SSHEngine {
 
 }
 
+/// Transport died after a session was up: sleep, a network change, or the server dropping SSH.
+/// Authentication and configuration failures are not link loss.
+public func sshFailureShouldReconnect(_ error: Error) -> Bool {
+    guard let clientError = error as? SSHClientError else { return false }
+    switch clientError {
+    case .connectionScopeEnded:
+        return true
+    case .connectionFailed(let failure):
+        switch failure.code {
+        case .transportClosed, .transportError, .remoteDisconnect:
+            return true
+        default:
+            return false
+        }
+    case .operationFailed(let failure):
+        switch failure.code {
+        case .transportClosed, .transportError, .remoteDisconnect, .channelClosed:
+            return true
+        default:
+            return false
+        }
+    default:
+        return false
+    }
+}
+
+public func sshReconnectClassificationProbes() -> Bool {
+    let dropped = sshFailureShouldReconnect(SSHClientError.connectionScopeEnded)
+    let auth = sshFailureShouldReconnect(
+        SSHClientError.authenticationRejected(
+            methodName: "password",
+            availableMethods: [],
+            partialSuccess: false
+        )
+    )
+    return dropped && !auth
+}
+
 public func describeSSHError(_ error: Error) -> String {
     if let localized = error as? LocalizedError, let description = localized.errorDescription {
         return description
