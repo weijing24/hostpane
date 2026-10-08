@@ -24,8 +24,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/GitSwiftHQ/Traversio.git",
       "state" : {
-        "revision" : "f4d4b870152e88af8cde54514084a3f0c93afcad",
-        "version" : "1.0.8"
+        "revision" : "a05ab9513115156fa2f907a7465a036cbcb69cef",
+        "version" : "1.0.9"
       }
     }
   ],
