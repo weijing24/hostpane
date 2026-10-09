@@ -124,6 +124,14 @@ struct ConnectionInfoView: View {
                 Text("连接日志")
                     .font(.subheadline.weight(.semibold))
                 Spacer()
+                Button {
+                    copyLogs(progress.logs)
+                } label: {
+                    Label("复制", systemImage: "doc.on.doc")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(progress.logs.isEmpty)
                 Button(progress.logsVisible ? "隐藏" : "显示") {
                     progress.logsVisible.toggle()
                 }
@@ -136,13 +144,6 @@ struct ConnectionInfoView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
-                    Button {
-                        copyLogs(progress.logs)
-                    } label: {
-                        Label("复制", systemImage: "doc.on.doc")
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
                 }
                 VStack(alignment: .leading, spacing: 12) {
                     ForEach(sections(progress.logs), id: \.title) { section in

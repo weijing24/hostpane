@@ -1,7 +1,16 @@
 import Foundation
 
 public enum DockerProbe {
+    /// Non-interactive SSH on Synology DSM uses `PATH=/usr/bin:/bin:/usr/sbin:/sbin`.
+    /// Container Manager's `docker` is `/usr/local/bin/docker`, so `command -v docker` misses it.
+    public static let remotePathExport = #"export PATH="$PATH:/usr/local/bin:/usr/local/sbin:/var/packages/ContainerManager/target/usr/bin:/var/packages/Docker/target/usr/bin""#
+
+    public static func withRemotePath(_ script: String) -> String {
+        remotePathExport + "\n" + script
+    }
+
     public static let detectCommand = #"""
+    export PATH="$PATH:/usr/local/bin:/usr/local/sbin:/var/packages/ContainerManager/target/usr/bin:/var/packages/Docker/target/usr/bin"
     LANG=C LC_ALL=C
     echo HP_BEGIN
     echo "docker_bin=$(command -v docker 2>/dev/null || true)"
@@ -24,6 +33,7 @@ public enum DockerProbe {
 
     /// Fast inventory for first paint: no stats (1–2s), no system df, no events, no bulk inspect.
     public static let snapshotCommand = #"""
+    export PATH="$PATH:/usr/local/bin:/usr/local/sbin:/var/packages/ContainerManager/target/usr/bin:/var/packages/Docker/target/usr/bin"
     LANG=C LC_ALL=C
     echo HP_BEGIN
     echo HP_PS
@@ -43,6 +53,7 @@ public enum DockerProbe {
     """#
 
     public static let liveCommand = #"""
+    export PATH="$PATH:/usr/local/bin:/usr/local/sbin:/var/packages/ContainerManager/target/usr/bin:/var/packages/Docker/target/usr/bin"
     LANG=C LC_ALL=C
     echo HP_BEGIN
     echo HP_PS
@@ -53,6 +64,7 @@ public enum DockerProbe {
     """#
 
     public static let diskCommand = #"""
+    export PATH="$PATH:/usr/local/bin:/usr/local/sbin:/var/packages/ContainerManager/target/usr/bin:/var/packages/Docker/target/usr/bin"
     LANG=C LC_ALL=C
     echo HP_BEGIN
     echo HP_DF
@@ -61,6 +73,7 @@ public enum DockerProbe {
     """#
 
     public static let eventsCommand = #"""
+    export PATH="$PATH:/usr/local/bin:/usr/local/sbin:/var/packages/ContainerManager/target/usr/bin:/var/packages/Docker/target/usr/bin"
     LANG=C LC_ALL=C
     echo HP_BEGIN
     echo HP_EVENTS
@@ -73,49 +86,49 @@ public enum DockerProbe {
     }
 
     public static func actionCommand(_ verb: String, name: String) -> String {
-        "docker \(verb) -- \(shellQuote(name))"
+        withRemotePath("docker \(verb) -- \(shellQuote(name))")
     }
 
     public static func logsCommand(name: String) -> String {
-        "docker logs --tail 200 --timestamps \(shellQuote(name)) 2>&1"
+        withRemotePath("docker logs --tail 200 --timestamps \(shellQuote(name)) 2>&1")
     }
 
     public static func topCommand(name: String) -> String {
-        "docker top \(shellQuote(name)) 2>&1"
+        withRemotePath("docker top \(shellQuote(name)) 2>&1")
     }
 
     public static func inspectCommand(name: String) -> String {
-        "docker inspect \(shellQuote(name)) 2>&1"
+        withRemotePath("docker inspect \(shellQuote(name)) 2>&1")
     }
 
     public static func imageHistoryCommand(name: String) -> String {
-        "docker history --format '{{.CreatedBy}}|{{.Size}}' \(shellQuote(name)) 2>/dev/null"
+        withRemotePath("docker history --format '{{.CreatedBy}}|{{.Size}}' \(shellQuote(name)) 2>/dev/null")
     }
 
     public static func imageRemoveCommand(name: String) -> String {
-        "docker rmi \(shellQuote(name))"
+        withRemotePath("docker rmi \(shellQuote(name))")
     }
 
     public static func imageTagCommand(source: String, target: String) -> String {
-        "docker tag \(shellQuote(source)) \(shellQuote(target))"
+        withRemotePath("docker tag \(shellQuote(source)) \(shellQuote(target))")
     }
 
     public static func volumeInspectCommand(name: String) -> String {
-        "docker volume inspect \(shellQuote(name)) 2>&1"
+        withRemotePath("docker volume inspect \(shellQuote(name)) 2>&1")
     }
 
     public static func volumeRemoveCommand(name: String) -> String {
-        "docker volume rm \(shellQuote(name))"
+        withRemotePath("docker volume rm \(shellQuote(name))")
     }
 
-    public static let volumePruneCommand = "docker volume prune -f"
+    public static let volumePruneCommand = withRemotePath("docker volume prune -f")
 
     public static func networkInspectCommand(name: String) -> String {
-        "docker network inspect \(shellQuote(name)) 2>&1"
+        withRemotePath("docker network inspect \(shellQuote(name)) 2>&1")
     }
 
     public static func networkRemoveCommand(name: String) -> String {
-        "docker network rm \(shellQuote(name))"
+        withRemotePath("docker network rm \(shellQuote(name))")
     }
 }
 

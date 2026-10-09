@@ -75,6 +75,7 @@ public struct LinuxMetricsProbe {
 
     /// Cheap Docker inventory. Not part of the 5s hot path.
     public static let dockerSummaryCommand = #"""
+    export PATH="$PATH:/usr/local/bin:/usr/local/sbin:/var/packages/ContainerManager/target/usr/bin:/var/packages/Docker/target/usr/bin"
     LANG=C LC_ALL=C
     echo HP_BEGIN
     echo "docker_engine=$(docker version --format '{{.Server.Version}}' 2>/dev/null || true)"
@@ -86,6 +87,7 @@ public struct LinuxMetricsProbe {
 
     /// Per-container stats. Only when the status-detail Docker card is on screen.
     public static let dockerCardsCommand = #"""
+    export PATH="$PATH:/usr/local/bin:/usr/local/sbin:/var/packages/ContainerManager/target/usr/bin:/var/packages/Docker/target/usr/bin"
     LANG=C LC_ALL=C
     echo HP_BEGIN
     echo HP_DOCKER

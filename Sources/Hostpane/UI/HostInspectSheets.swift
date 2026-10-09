@@ -104,7 +104,7 @@ struct ProcessTableView: View {
             } else {
                 ForEach(rows) { process in
                     HStack(spacing: 8) {
-                        Text("\(process.pid)")
+                        Text(String(process.pid))
                             .frame(width: 64, alignment: .leading)
                         Text(process.command)
                             .lineLimit(1)

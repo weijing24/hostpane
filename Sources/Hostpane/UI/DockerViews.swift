@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import HostpaneCore
 
@@ -410,6 +411,14 @@ struct DockerConnectionInfoView: View {
                 Text("连接日志")
                     .font(.subheadline.weight(.semibold))
                 Spacer()
+                Button {
+                    copyLogs(progress.logs)
+                } label: {
+                    Label("复制", systemImage: "doc.on.doc")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(progress.logs.isEmpty)
                 Button(progress.logsVisible ? "隐藏" : "显示") {
                     progress.logsVisible.toggle()
                 }
@@ -448,6 +457,12 @@ struct DockerConnectionInfoView: View {
                 .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }
+    }
+
+    private func copyLogs(_ lines: [ConnectionLogLine]) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(lines.map(\.formattedLine).joined(separator: "\n"), forType: .string)
     }
 
     private func sections(_ lines: [ConnectionLogLine]) -> [(title: String, lines: [ConnectionLogLine])] {

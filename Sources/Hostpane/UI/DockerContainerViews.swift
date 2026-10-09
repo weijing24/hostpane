@@ -19,7 +19,10 @@ struct DockerContainersView: View {
                 .frame(maxWidth: .infinity, minHeight: 180)
             } else {
                 LazyVGrid(
-                    columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)],
+                    columns: [
+                        GridItem(.flexible(), spacing: 12, alignment: .top),
+                        GridItem(.flexible(), spacing: 12, alignment: .top)
+                    ],
                     spacing: 12
                 ) {
                     ForEach(filtered(runtime)) { item in
@@ -27,6 +30,7 @@ struct DockerContainersView: View {
                             runtime.dockerSelectedContainerID = item.id
                         }
                         .contextMenu { containerMenu(item) }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     }
                 }
             }
@@ -113,9 +117,8 @@ private struct DockerContainerCard: View {
                     Text(item.name)
                         .font(.headline)
                         .foregroundStyle(HostpaneTheme.docker)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
-                    Spacer(minLength: 8)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, minHeight: 22, alignment: .leading)
                     Image(systemName: "chevron.right")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.tertiary)
@@ -138,52 +141,54 @@ private struct DockerContainerCard: View {
                             .foregroundStyle(HostpaneTheme.online)
                     }
                 }
+                .frame(minHeight: 22)
                 Text(item.image)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                if !item.composeLine.isEmpty {
-                    Label(item.composeLine, systemImage: "square.stack.3d.up")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    .frame(maxWidth: .infinity, minHeight: 16, alignment: .leading)
+                Label(item.composeLine.isEmpty ? " " : item.composeLine, systemImage: "square.stack.3d.up")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .opacity(item.composeLine.isEmpty ? 0 : 1)
+                    .accessibilityHidden(item.composeLine.isEmpty)
+                    .frame(maxWidth: .infinity, minHeight: 16, alignment: .leading)
+                Divider().opacity(0.35)
+                HStack(alignment: .center, spacing: 8) {
+                    RingMeter(
+                        title: "CPU",
+                        ratio: min(item.cpuRatio, 1),
+                        color: HostpaneTheme.cpuRing,
+                        size: 52,
+                        titleOnTop: true
+                    )
+                    RingMeter(
+                        title: "RAM",
+                        ratio: item.memoryRatio,
+                        color: HostpaneTheme.memoryRing,
+                        size: 52,
+                        titleOnTop: true
+                    )
+                    ioColumn(
+                        title: "网络",
+                        up: item.netTransmitBytes,
+                        down: item.netReceiveBytes,
+                        upIcon: "arrow.up.circle",
+                        downIcon: "arrow.down.circle"
+                    )
+                    ioColumn(
+                        title: "Block IO",
+                        up: item.blockReadBytes,
+                        down: item.blockWriteBytes,
+                        upIcon: "r.circle",
+                        downIcon: "w.circle"
+                    )
                 }
-                if item.isRunning || item.isPaused {
-                    Divider().opacity(0.35)
-                    HStack(alignment: .center, spacing: 8) {
-                        RingMeter(
-                            title: "CPU",
-                            ratio: min(item.cpuRatio, 1),
-                            color: HostpaneTheme.cpuRing,
-                            size: 52,
-                            titleOnTop: true
-                        )
-                        RingMeter(
-                            title: "RAM",
-                            ratio: item.memoryRatio,
-                            color: HostpaneTheme.memoryRing,
-                            size: 52,
-                            titleOnTop: true
-                        )
-                        ioColumn(
-                            title: "网络",
-                            up: item.netTransmitBytes,
-                            down: item.netReceiveBytes,
-                            upIcon: "arrow.up.circle",
-                            downIcon: "arrow.down.circle"
-                        )
-                        ioColumn(
-                            title: "Block IO",
-                            up: item.blockReadBytes,
-                            down: item.blockWriteBytes,
-                            upIcon: "r.circle",
-                            downIcon: "w.circle"
-                        )
-                    }
-                }
+                .frame(maxWidth: .infinity, minHeight: 74, alignment: .center)
             }
             .padding(14)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .hostpaneGlassCard(cornerRadius: 16)
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -322,7 +327,7 @@ struct DockerContainerDetailView: View {
                 HStack {
                     Text("PID")
                     Spacer()
-                    Text(item.pid == 0 ? "—" : "\(item.pid)")
+                    Text(item.pid == 0 ? "—" : String(item.pid))
                         .monospacedDigit()
                         .foregroundStyle(.secondary)
                 }
