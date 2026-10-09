@@ -246,6 +246,9 @@ struct DockerHostView: View {
         .navigationTitle(host.displayName)
         .toolbar {
             ToolbarItem {
+                DockerHostSwitcher(host: host)
+            }
+            ToolbarItem {
                 Button("重新加载") { model.restartDocker(host) }
             }
             ToolbarItem {
@@ -259,6 +262,43 @@ struct DockerHostView: View {
             default:
                 break
             }
+        }
+    }
+}
+
+private struct DockerHostSwitcher: View {
+    @Environment(AppModel.self) private var model
+    let host: HostRecord
+    @State private var isPresented = false
+
+    var body: some View {
+        Button("切换机器") {
+            isPresented = true
+        }
+        .help("切换到其他机器的 Docker")
+        .popover(isPresented: $isPresented, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(model.hosts) { other in
+                    Button {
+                        isPresented = false
+                        guard other.id != host.id else { return }
+                        model.openDocker(other)
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "checkmark")
+                                .opacity(other.id == host.id ? 1 : 0)
+                            Text(other.displayName)
+                            Spacer(minLength: 0)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                }
+            }
+            .padding(6)
+            .frame(minWidth: 160)
         }
     }
 }
