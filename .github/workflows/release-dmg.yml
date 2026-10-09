@@ -20,6 +20,11 @@ permissions:
 
 jobs:
   dmg:
+    # The version commit is pushed with the workflow token. Skip it if that
+    # push still starts a run, or the next release would bump forever.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      !contains(github.event.head_commit.message, '[skip ci]')
     runs-on: macos-26
     steps:
       - name: Checkout
@@ -132,7 +137,13 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          ver="${{ steps.version.outputs.ver }}"
+          git add Sources/Hostpane/Resources/Info.plist
+          if ! git diff --cached --quiet; then
+            git commit -m "Set version to ${ver}. [skip ci]"
+          fi
           git tag -a "$tag" -m "$tag"
+          git push origin HEAD
           git push origin "$tag"
           gh release create "$tag" "$dmg" \
             --title "$tag" \

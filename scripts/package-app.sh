@@ -27,6 +27,18 @@ rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$bin_dir/Hostpane" "$app/Contents/MacOS/Hostpane"
 cp "$root/Sources/Hostpane/Resources/Info.plist" "$app/Contents/Info.plist"
+# CI writes the upcoming version into the source plist before packaging.
+# A local build has no such rewrite, so About would keep the last committed
+# number (it stayed 1.0.4 through the v1.4.0 tag). Stamp the bundle from the
+# latest release tag instead of modifying the working tree.
+if [ "$ci" != 1 ]; then
+  tag="$(git tag -l 'v[0-9]*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true)"
+  if [ -n "$tag" ]; then
+    ver="${tag#v}"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $ver" "$app/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $ver" "$app/Contents/Info.plist"
+  fi
+fi
 # New filename so IconServices does not reuse the old teal-server cache entry.
 cp "$root/Sources/Hostpane/Resources/AppIcon.icns" "$app/Contents/Resources/Hostpane.icns"
 cp "$root/Sources/Hostpane/Resources/AppIcon-1024.png" "$app/Contents/Resources/Hostpane.png"

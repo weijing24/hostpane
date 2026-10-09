@@ -23,7 +23,7 @@ else
   app="/Applications/Hostpane.app"
 fi
 
-version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$root/Sources/Hostpane/Resources/Info.plist")"
+version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")"
 arch="$(uname -m)"
 stage="$root/dist/dmg-stage"
 dmg="$root/dist/Hostpane-${version}-${arch}.dmg"
