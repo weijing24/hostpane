@@ -117,6 +117,54 @@ public actor SSHEngine {
         agent = nil
     }
 
+    /// Keeps one local listener per spec until this task is cancelled or the SSH transport dies.
+    /// A single bind failure does not stop the other listeners.
+    public func serveLocalForwards(
+        _ specs: [LocalForwardSpec],
+        onBound: @escaping @Sendable (LocalForwardBinding) -> Void,
+        onFailure: @escaping @Sendable (LocalForwardSpec, String) -> Void
+    ) async {
+        guard let connection else {
+            for spec in specs {
+                onFailure(spec, describeSSHError(HostpaneSSHError.notConnected))
+            }
+            return
+        }
+        await withTaskGroup(of: Void.self) { group in
+            for spec in specs {
+                group.addTask {
+                    do {
+                        try await connection.withLocalPortForwarding(
+                            targetHost: spec.targetHost,
+                            targetPort: spec.targetPort,
+                            localHost: spec.localHost,
+                            localPort: spec.localPort
+                        ) { forward in
+                            onBound(
+                                LocalForwardBinding(
+                                    localHost: forward.localHost,
+                                    localPort: forward.localPort,
+                                    targetHost: forward.targetHost,
+                                    targetPort: forward.targetPort
+                                )
+                            )
+                            try await Self.sleepUntilCancelled()
+                        }
+                    } catch is CancellationError {
+                    } catch {
+                        onFailure(spec, describeSSHError(error))
+                    }
+                }
+            }
+        }
+    }
+
+    private static func sleepUntilCancelled() async throws {
+        while !Task.isCancelled {
+            try await Task.sleep(for: .seconds(3_600))
+        }
+    }
+
     private func makeConfiguration(
         host: HostRecord,
         secrets: SecretStore,
@@ -359,6 +407,45 @@ public func sshReconnectClassificationProbes() -> Bool {
         )
     )
     return dropped && !auth
+}
+
+/// What the terminal should do after the shell channel reports an ending.
+public enum ShellChannelOutcome: Equatable, Sendable {
+    /// The remote shell is gone. Leave the terminal closed.
+    case shellExited(UInt32)
+    /// The SSH transport died while the shell was still running.
+    case dropped
+}
+
+/// Ctrl+D, `exit`, and a remote channel close are a shell exit. OpenSSH often
+/// sends channel EOF before `exit-status`, and the following read can throw
+/// once that channel is gone. Only a transport failure with no shell-end
+/// signal means the link dropped.
+public func shellChannelOutcome(
+    sawExitStatus: UInt32?,
+    sawChannelEnd: Bool,
+    transportFailed: Bool
+) -> ShellChannelOutcome {
+    if let sawExitStatus {
+        return .shellExited(sawExitStatus)
+    }
+    if sawChannelEnd || !transportFailed {
+        return .shellExited(0)
+    }
+    return .dropped
+}
+
+public func shellExitReconnectProbes() -> Bool {
+    let ctrlD = shellChannelOutcome(sawExitStatus: nil, sawChannelEnd: true, transportFailed: false)
+    let status = shellChannelOutcome(sawExitStatus: 130, sawChannelEnd: false, transportFailed: false)
+    let closed = shellChannelOutcome(sawExitStatus: nil, sawChannelEnd: false, transportFailed: false)
+    let eofThenReset = shellChannelOutcome(sawExitStatus: nil, sawChannelEnd: true, transportFailed: true)
+    let network = shellChannelOutcome(sawExitStatus: nil, sawChannelEnd: false, transportFailed: true)
+    return ctrlD == .shellExited(0)
+        && status == .shellExited(130)
+        && closed == .shellExited(0)
+        && eofThenReset == .shellExited(0)
+        && network == .dropped
 }
 
 public func describeSSHError(_ error: Error) -> String {

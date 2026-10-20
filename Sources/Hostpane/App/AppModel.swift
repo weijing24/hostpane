@@ -11,6 +11,23 @@ enum DashboardReachability: Equatable, Sendable {
     case offline
 }
 
+enum LocalForwardStatus: Equatable, Sendable {
+    case off
+    case starting
+    case listening
+    case failed(String)
+}
+
+private struct SnippetHostOutcome: Sendable {
+    var ok: Bool
+    var chunk: String
+}
+
+private func snippetShellCommand(_ body: String) -> String {
+    let marker = "HOSTPANE_\(UUID().uuidString.replacingOccurrences(of: "-", with: ""))"
+    return "bash -s <<'\(marker)'\n\(body)\n\(marker)"
+}
+
 enum ConnectionPhase: Equatable, Sendable {
     case idle
     case connecting
@@ -306,6 +323,15 @@ final class AppModel {
     private var recoveryTask: Task<Void, Never>?
     private var lastTerminalReconnect: [UUID: ContinuousClock.Instant] = [:]
     private var appearanceObserver: NSObjectProtocol?
+    private var forwardTask: Task<Void, Never>?
+    private var forwardEngine: SSHEngine?
+    private var forwardGeneration = 0
+    private var forwardsEnabled = false
+    private var forwardHostID: UUID?
+    private var forwardAttempt = 0
+    var localForwardStatus: LocalForwardStatus = .off
+    var localForwardPorts: [UInt16] = []
+    var localForwardError: String?
 
     init(
         store: HostStore = HostStore(),
@@ -555,6 +581,7 @@ final class AppModel {
             .joined(separator: "\n")
         }
         refreshConflictNotice()
+        syncSuggestedForwards()
     }
 
     func reloadSyncedDataIfDiskChanged() {
@@ -570,6 +597,7 @@ final class AppModel {
         if let disk = try? keyStore.load(), disk != keys {
             keys = disk
         }
+        syncSuggestedForwards()
     }
 
     func refreshConflictNotice() {
@@ -632,41 +660,309 @@ final class AppModel {
     }
 
     func executeSnippet(_ snippet: CodeSnippet, hosts: [HostRecord]) async -> SnippetRun {
-        var chunks: [String] = []
-        var succeeded = 0
-        var failed = 0
-        for host in hosts {
-            let engine = SSHEngine()
-            let marker = "HOSTPANE_\(UUID().uuidString.replacingOccurrences(of: "-", with: ""))"
-            let command = "bash -s <<'\(marker)'\n\(snippet.body)\n\(marker)"
-            do {
-                try await engine.connect(host: host, secrets: secrets, settings: settings, keepAlive: .terminal)
-                let result = try await executeSnippetCommand(command, on: engine)
-                let text = String(decoding: result.standardOutput, as: UTF8.self)
-                let errorText = String(decoding: result.standardError, as: UTF8.self)
-                let exit = result.exitStatus ?? 1
-                if exit == 0 {
-                    succeeded += 1
-                } else {
-                    failed += 1
+        let indexed = await withTaskGroup(of: (Int, SnippetHostOutcome).self) { group in
+            var nextIndex = 0
+            var running = 0
+
+            @MainActor func launch() {
+                while running < SnippetExecutionPlan.maxConcurrentHosts, nextIndex < hosts.count {
+                    let index = nextIndex
+                    nextIndex += 1
+                    running += 1
+                    let host = hosts[index]
+                    let command = snippetShellCommand(snippet.body)
+                    group.addTask { [weak self] in
+                        guard let self else {
+                            return (index, SnippetHostOutcome(ok: false, chunk: "=== \(host.displayName) ===\n尚未连接。"))
+                        }
+                        let outcome = await self.runSnippet(command, host: host, snippetName: snippet.name)
+                        return (index, outcome)
+                    }
                 }
-                chunks.append("=== \(host.displayName) exit=\(exit) ===\n\(text)\(errorText)")
-                logger.info("app", "snippet \(snippet.name) on \(host.displayName) exit=\(exit)")
-            } catch {
-                failed += 1
-                chunks.append("=== \(host.displayName) ===\n\(error.localizedDescription)")
-                logger.error("app", "snippet \(snippet.name) on \(host.displayName) failed: \(error.localizedDescription)")
             }
-            await engine.close()
+            launch()
+
+            var collected: [(Int, SnippetHostOutcome)] = []
+            while let item = await group.next() {
+                collected.append(item)
+                running -= 1
+                launch()
+            }
+            return collected
         }
+        let ordered = indexed.sorted { $0.0 < $1.0 }.map(\.1)
+        let succeeded = ordered.filter(\.ok).count
+        let failed = ordered.count - succeeded
         let run = SnippetRun(
             snippetID: snippet.id,
             summary: "成功 \(succeeded)，失败 \(failed)",
-            output: chunks.joined(separator: "\n\n")
+            output: ordered.map(\.chunk).joined(separator: "\n\n")
         )
         snippetLibrary.runs.insert(run, at: 0)
         saveSnippets()
         return run
+    }
+
+    /// Turns suggested NAS forwarding on, or describes the listeners already bound.
+    func portForwardNotice(for host: HostRecord) -> String {
+        let ports = SuggestedLocalForwards.ports.map(String.init).joined(separator: "、")
+        guard SuggestedLocalForwards.matches(host) else {
+            return "本地转发目前只接到 NAS（名称或主机名包含 synology）的 \(ports)。"
+        }
+        if !settings.suggestPortForward {
+            settings.suggestPortForward = true
+            persistSettings()
+            return "正在把 NAS 的 \(ports) 转到本机 127.0.0.1。"
+        }
+        switch localForwardStatus {
+        case .off, .starting:
+            return "正在连接 \(host.displayName)，准备监听 127.0.0.1 的 \(ports)。"
+        case .listening:
+            let bound = localForwardPorts.map(String.init).joined(separator: "、")
+            if let localForwardError {
+                return "本机 127.0.0.1 正在转发 \(bound)。\(localForwardError)"
+            }
+            return "本机 127.0.0.1 正在转发 \(bound)。"
+        case .failed(let message):
+            return message
+        }
+    }
+
+    func syncSuggestedForwards(force: Bool = false) {
+        let enabled = settings.suggestPortForward
+        let hostID = hosts.first(where: SuggestedLocalForwards.matches)?.id
+        let unchanged = !force
+            && enabled == forwardsEnabled
+            && hostID == forwardHostID
+            && (forwardTask != nil || !enabled)
+        forwardsEnabled = enabled
+        forwardHostID = hostID
+        if unchanged { return }
+        guard enabled else {
+            stopSuggestedForwards()
+            return
+        }
+        guard hostID != nil else {
+            stopSuggestedForwards()
+            localForwardStatus = .failed("没有找到 NAS。名称或主机名里需要有 synology。")
+            logger.warn("forward", "no synology host for suggested local forwards")
+            return
+        }
+        startSuggestedForwards()
+    }
+
+    private func stopSuggestedForwards() {
+        forwardGeneration += 1
+        forwardTask?.cancel()
+        forwardTask = nil
+        let engine = forwardEngine
+        forwardEngine = nil
+        localForwardPorts = []
+        localForwardError = nil
+        localForwardStatus = .off
+        if let engine {
+            Task { await engine.close() }
+        }
+    }
+
+    private func startSuggestedForwards() {
+        forwardGeneration += 1
+        let generation = forwardGeneration
+        forwardTask?.cancel()
+        let previous = forwardEngine
+        forwardEngine = nil
+        localForwardPorts = []
+        localForwardError = nil
+        localForwardStatus = .starting
+        forwardTask = Task { [weak self] in
+            await previous?.close()
+            try? await Task.sleep(for: .milliseconds(200))
+            guard let self, self.forwardGeneration == generation else { return }
+            await self.maintainSuggestedForwards(generation: generation)
+        }
+    }
+
+    private func maintainSuggestedForwards(generation: Int) async {
+        var pause: Duration = .zero
+        while !Task.isCancelled, forwardGeneration == generation {
+            if pause > .zero {
+                try? await Task.sleep(for: pause)
+                guard !Task.isCancelled, forwardGeneration == generation else { return }
+            }
+            guard let hostID = forwardHostID,
+                  let host = hosts.first(where: { $0.id == hostID })
+            else {
+                localForwardStatus = .failed("没有找到 NAS。名称或主机名里需要有 synology。")
+                logger.warn("forward", "synology host disappeared")
+                return
+            }
+            forwardAttempt += 1
+            let attempt = forwardAttempt
+            let engine = SSHEngine()
+            forwardEngine = engine
+            localForwardPorts = []
+            localForwardError = nil
+            localForwardStatus = .starting
+            let ports = SuggestedLocalForwards.ports.map(String.init).joined(separator: ",")
+            logger.info("forward", "local forward \(host.displayName) \(ports)")
+            do {
+                try await engine.connect(host: host, secrets: secrets, settings: settings, keepAlive: .terminal) { [weak self] event in
+                    Task { @MainActor in
+                        self?.appendSSHLog(event)
+                    }
+                }
+                guard !Task.isCancelled, forwardGeneration == generation else {
+                    await engine.close()
+                    return
+                }
+                await engine.serveLocalForwards(
+                    SuggestedLocalForwards.specs(),
+                    onBound: { [weak self] binding in
+                        Task { @MainActor in
+                            self?.noteForwardBound(binding, generation: generation, attempt: attempt)
+                        }
+                    },
+                    onFailure: { [weak self] spec, message in
+                        Task { @MainActor in
+                            self?.noteForwardFailed(
+                                port: spec.localPort,
+                                message: message,
+                                generation: generation,
+                                attempt: attempt
+                            )
+                        }
+                    }
+                )
+            } catch is CancellationError {
+                await engine.close()
+                return
+            } catch {
+                await engine.close()
+                if forwardEngine === engine { forwardEngine = nil }
+                let message = describeSSHError(error)
+                localForwardStatus = .failed(message)
+                logger.error("forward", "local forward connect failed: \(message)")
+                guard localForwardConnectShouldRetry(error),
+                      !Task.isCancelled,
+                      forwardGeneration == generation
+                else { return }
+                pause = .seconds(8)
+                continue
+            }
+            await engine.close()
+            if forwardEngine === engine { forwardEngine = nil }
+            forwardAttempt += 1
+            guard !Task.isCancelled, forwardGeneration == generation else { return }
+            if localForwardPorts.isEmpty {
+                let message = localForwardError ?? "本地端口没有听上。"
+                localForwardStatus = .failed(message)
+                logger.warn("forward", message)
+            } else {
+                localForwardPorts = []
+                localForwardStatus = .starting
+            }
+            pause = .seconds(8)
+        }
+    }
+
+    private func noteForwardBound(_ binding: LocalForwardBinding, generation: Int, attempt: Int) {
+        guard generation == forwardGeneration, attempt == forwardAttempt else { return }
+        if !localForwardPorts.contains(binding.localPort) {
+            localForwardPorts.append(binding.localPort)
+            localForwardPorts.sort()
+        }
+        localForwardStatus = .listening
+        logger.info(
+            "forward",
+            "listening \(binding.localHost):\(binding.localPort) -> \(binding.targetHost):\(binding.targetPort)"
+        )
+    }
+
+    private func noteForwardFailed(port: UInt16, message: String, generation: Int, attempt: Int) {
+        guard generation == forwardGeneration, attempt == forwardAttempt else { return }
+        let text = "\(port) 转发失败：\(message)"
+        localForwardError = text
+        logger.error("forward", "local forward \(port) failed: \(message)")
+        if localForwardPorts.isEmpty {
+            localForwardStatus = .failed(text)
+        }
+    }
+
+
+
+    private func runSnippet(_ command: String, host: HostRecord, snippetName: String) async -> SnippetHostOutcome {
+        if let (engine, choice) = await preferredSnippetEngine(for: host) {
+            do {
+                return try await snippetOutcome(
+                    command,
+                    host: host,
+                    snippetName: snippetName,
+                    engine: engine,
+                    via: choice.rawValue
+                )
+            } catch {
+                logger.warn(
+                    "app",
+                    "snippet \(snippetName) on \(host.displayName) left \(choice.rawValue): \(describeSSHError(error))"
+                )
+            }
+        }
+        let engine = SSHEngine()
+        do {
+            try await engine.connect(host: host, secrets: secrets, settings: settings, keepAlive: .terminal)
+            let outcome = try await snippetOutcome(
+                command,
+                host: host,
+                snippetName: snippetName,
+                engine: engine,
+                via: nil
+            )
+            await engine.close()
+            return outcome
+        } catch {
+            await engine.close()
+            logger.error("app", "snippet \(snippetName) on \(host.displayName) failed: \(describeSSHError(error))")
+            return SnippetHostOutcome(
+                ok: false,
+                chunk: "=== \(host.displayName) ===\n\(describeSSHError(error))"
+            )
+        }
+    }
+
+    private func preferredSnippetEngine(for host: HostRecord) async -> (SSHEngine, SnippetEngineChoice)? {
+        let runtime = runtime(for: host.id)
+        let monitorConnected = await runtime.monitorEngine.isConnected
+        let terminalConnected = await runtime.engine.isConnected
+        switch SnippetExecutionPlan.engineChoice(
+            monitorConnected: monitorConnected,
+            terminalConnected: terminalConnected
+        ) {
+        case .monitor:
+            return (runtime.monitorEngine, .monitor)
+        case .terminal:
+            return (runtime.engine, .terminal)
+        case .fresh:
+            return nil
+        }
+    }
+
+    private func snippetOutcome(
+        _ command: String,
+        host: HostRecord,
+        snippetName: String,
+        engine: SSHEngine,
+        via: String?
+    ) async throws -> SnippetHostOutcome {
+        let result = try await executeSnippetCommand(command, on: engine)
+        let text = String(decoding: result.standardOutput, as: UTF8.self)
+        let errorText = String(decoding: result.standardError, as: UTF8.self)
+        let exit = result.exitStatus ?? 1
+        let route = via.map { " via \($0)" } ?? ""
+        logger.info("app", "snippet \(snippetName) on \(host.displayName)\(route) exit=\(exit)")
+        return SnippetHostOutcome(
+            ok: exit == 0,
+            chunk: "=== \(host.displayName) exit=\(exit) ===\n\(text)\(errorText)"
+        )
     }
 
     private func executeSnippetCommand(_ command: String, on engine: SSHEngine) async throws -> SSHExecResult {
@@ -692,6 +988,7 @@ final class AppModel {
         logger.enabled = next.appLoggingEnabled
         try? settingsStore.save(next)
         applyAppearance()
+        syncSuggestedForwards()
     }
 
     func applyAppearance() {
@@ -1952,6 +2249,7 @@ final class AppModel {
     }
 
     func startLinkRecovery() {
+        syncSuggestedForwards()
         guard pathMonitor == nil else { return }
         let monitor = NWPathMonitor()
         pathMonitor = monitor
@@ -2006,6 +2304,7 @@ final class AppModel {
 
     private func recoverOpenLinks() {
         logger.info("ssh", "recover dashboard monitors and open terminals")
+        syncSuggestedForwards(force: true)
         var index = 0
         let terminals = hosts.filter { runtime(for: $0.id).terminalDesired }
         for host in terminals {

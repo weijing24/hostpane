@@ -201,25 +201,42 @@ final class TerminalSessionController: NSObject, @preconcurrency TerminalViewDel
 
     func runEventLoop() async {
         guard let session else { return }
+        var exitCode: UInt32?
+        var channelEnded = false
         do {
             for try await event in session.events {
                 switch event {
                 case .standardOutput(let bytes), .standardError(let bytes):
                     feed(bytes)
                 case .exitStatus(let code):
-                    finishSession(.shellExited(code))
-                    return
+                    exitCode = code
+                    channelEnded = true
                 case .endOfFile, .exitSignal:
-                    finishSession(.dropped)
-                    return
+                    channelEnded = true
                 @unknown default:
                     break
                 }
+                if channelEnded {
+                    break
+                }
             }
-            finishSession(.dropped)
+            finishFromChannel(exitCode: exitCode, channelEnded: channelEnded, transportFailed: false)
         } catch is CancellationError {
             return
         } catch {
+            finishFromChannel(exitCode: exitCode, channelEnded: channelEnded, transportFailed: true)
+        }
+    }
+
+    private func finishFromChannel(exitCode: UInt32?, channelEnded: Bool, transportFailed: Bool) {
+        switch shellChannelOutcome(
+            sawExitStatus: exitCode,
+            sawChannelEnd: channelEnded,
+            transportFailed: transportFailed
+        ) {
+        case .shellExited(let code):
+            finishSession(.shellExited(code))
+        case .dropped:
             finishSession(.dropped)
         }
     }

@@ -132,6 +132,7 @@ func inspectMetricChecks() throws {
     try expect(!LinuxMetricsProbe.dockerSummaryCommand.contains("docker stats"), "slow path skips stats")
     try expect(LinuxMetricsProbe.dockerCardsCommand.contains("docker stats"), "visible card can request stats")
     try expect(sshReconnectClassificationProbes(), "link loss reconnects and auth failure does not")
+    try expect(shellExitReconnectProbes(), "ctrl-d and channel close do not reconnect")
 }
 
 func storageSelectionChecks() throws {
@@ -1064,6 +1065,37 @@ func appUpdateChecks() throws {
     }
 }
 
+func suggestedForwardAndSnippetChecks() throws {
+    let nas = HostRecord(name: "jim-synology", hostname: "10.10.10.10", username: "root")
+    let alias = HostRecord(name: "nas", hostname: "jim-synology", username: "root")
+    let other = HostRecord(name: "jp01", hostname: "jp01.jimwei.eu.org", username: "ubuntu")
+    try expect(SuggestedLocalForwards.matches(nas), "synology name")
+    try expect(SuggestedLocalForwards.matches(alias), "synology hostname")
+    try expect(!SuggestedLocalForwards.matches(other), "other host is not the nas")
+    let specs = SuggestedLocalForwards.specs()
+    try expect(specs.map(\.localPort) == [8080, 3622, 8090], "nas ports")
+    try expect(
+        specs.allSatisfy {
+            $0.localPort == $0.targetPort && $0.localHost == "127.0.0.1" && $0.targetHost == "127.0.0.1"
+        },
+        "forwards bind localhost to the same remote port"
+    )
+    try expect(localForwardRetryProbes(), "forward retry skips auth and retries a dropped transport")
+    try expect(SnippetExecutionPlan.maxConcurrentHosts == 4, "snippet concurrency")
+    try expect(
+        SnippetExecutionPlan.engineChoice(monitorConnected: true, terminalConnected: true) == .monitor,
+        "snippet prefers the monitor"
+    )
+    try expect(
+        SnippetExecutionPlan.engineChoice(monitorConnected: false, terminalConnected: true) == .terminal,
+        "snippet uses the terminal next"
+    )
+    try expect(
+        SnippetExecutionPlan.engineChoice(monitorConnected: false, terminalConnected: false) == .fresh,
+        "snippet opens a new connection last"
+    )
+}
+
 do {
     try metricsChecks()
     try appUpdateChecks()
@@ -1083,6 +1115,7 @@ do {
     try configSyncChecks()
     try keyFingerprintChecks()
     try dockerParserChecks()
+    try suggestedForwardAndSnippetChecks()
     print("HostpaneCheck passed")
 } catch {
     fputs("HostpaneCheck failed: \(error)\n", stderr)

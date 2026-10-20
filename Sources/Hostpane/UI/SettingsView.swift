@@ -478,7 +478,10 @@ struct SettingsView: View {
     private var terminalPane: some View {
         @Bindable var model = model
         VStack(alignment: .leading, spacing: 26) {
-            SettingsGroup(title: "会话") {
+            SettingsGroup(
+                title: "会话",
+                footer: "打开后，把 NAS（名称或主机名包含 synology）上的 8080、3622、8090 转到本机 127.0.0.1 的相同端口。休眠或换网络后会重新接上。远程转发还没有。"
+            ) {
                 SettingsToggleRow(title: "终端提示音", isOn: $model.settings.terminalBellEnabled)
                 SettingsHairline()
                 SettingsToggleRow(title: "建议端口转发", isOn: $model.settings.suggestPortForward)

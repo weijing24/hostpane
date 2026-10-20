@@ -38,7 +38,7 @@ struct HostProfileView: View {
             Text("会从 Hostpane 主机簿里移除，不会改 ~/.ssh/config。")
         }
         .alert(
-            "还没接上",
+            "端口转发",
             isPresented: Binding(
                 get: { stubMessage != nil },
                 set: { if !$0 { stubMessage = nil } }
@@ -143,7 +143,7 @@ struct HostProfileView: View {
             pill("启动终端") { model.openTerminal(host) }
             pill("启动 SFTP") { model.openSFTP(host) }
             pill("Docker") { model.openDocker(host) }
-            pill("端口转发") { stubMessage = "端口转发还没接上。" }
+            pill("端口转发") { stubMessage = model.portForwardNotice(for: host) }
             pill("状态监控") { showInspect = true }
             Spacer(minLength: 0)
         }
